@@ -1,3 +1,5 @@
+[![Download](https://img.shields.io/github/v/release/balamurugan-cholas/dosa?label=Download&style=flat-square)](https://github.com/balamurugan-cholas/dosa/releases/latest)
+
 # Dosa — Real-Time Interview Assistant
 
 A lightweight, always-on-top desktop app that listens to your interview audio, transcribes it live, and generates AI-powered answers — all without leaving your screen.
