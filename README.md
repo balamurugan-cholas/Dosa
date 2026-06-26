@@ -19,7 +19,8 @@ A lightweight, always-on-top desktop app that listens to your interview audio, t
 
 ## Screenshots
 
-> _Add screenshots here_
+<img width="763" height="631" alt="image" src="https://github.com/user-attachments/assets/1f73166d-321e-41db-838c-9ce70067dad6" />
+
 
 ---
 
