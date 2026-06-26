@@ -19,8 +19,9 @@ A lightweight, always-on-top desktop app that listens to your interview audio, t
 
 ## Screenshots
 
-<img width="763" height="631" alt="image" src="https://github.com/user-attachments/assets/1f73166d-321e-41db-838c-9ce70067dad6" />
-<img width="765" height="975" alt="image" src="https://github.com/user-attachments/assets/f2440a92-2a28-4d2c-8437-6c81bce619be" />
+<img width="340" alt="Main View — live transcription with AI answer" src="https://github.com/user-attachments/assets/1f73166d-321e-41db-838c-9ce70067dad6" />
+&nbsp;&nbsp;
+<img width="340" alt="Settings View" src="https://github.com/user-attachments/assets/f2440a92-2a28-4d2c-8437-6c81bce619be" />
 
 
 
