@@ -62,7 +62,7 @@ The app requires you to bring your own API keys. None are bundled. All keys are 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/dosa.git
+git clone https://github.com/balamurugan-cholas/dosa.git
 cd dosa
 ```
 
