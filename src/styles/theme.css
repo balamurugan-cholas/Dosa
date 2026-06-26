@@ -1,0 +1,293 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 14px;
+  --background: #0d0d0d;
+  --foreground: #e0e0e0;
+  --card: #131313;
+  --card-foreground: #e0e0e0;
+  --popover: #131313;
+  --popover-foreground: #e0e0e0;
+  --primary: #e0e0e0;
+  --primary-foreground: #0d0d0d;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #e0e0e0;
+  --muted: #181818;
+  --muted-foreground: #5c5c5c;
+  --accent: #1e1e1e;
+  --accent-foreground: #e0e0e0;
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fca5a5;
+  --border: #222222;
+  --input: #1a1a1a;
+  --input-background: #1a1a1a;
+  --switch-background: #333333;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #444444;
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.125rem;
+  --sidebar: #111111;
+  --sidebar-foreground: #e0e0e0;
+  --sidebar-primary: #e0e0e0;
+  --sidebar-primary-foreground: #0d0d0d;
+  --sidebar-accent: #1e1e1e;
+  --sidebar-accent-foreground: #e0e0e0;
+  --sidebar-border: #222222;
+  --sidebar-ring: #444444;
+}
+
+.dark {
+  --background: #0d0d0d;
+  --foreground: #e0e0e0;
+  --card: #131313;
+  --card-foreground: #e0e0e0;
+  --popover: #131313;
+  --popover-foreground: #e0e0e0;
+  --primary: #e0e0e0;
+  --primary-foreground: #0d0d0d;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #e0e0e0;
+  --muted: #181818;
+  --muted-foreground: #5c5c5c;
+  --accent: #1e1e1e;
+  --accent-foreground: #e0e0e0;
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fca5a5;
+  --border: #222222;
+  --input: #1a1a1a;
+  --ring: #444444;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: #111111;
+  --sidebar-foreground: #e0e0e0;
+  --sidebar-primary: #e0e0e0;
+  --sidebar-primary-foreground: #0d0d0d;
+  --sidebar-accent: #1e1e1e;
+  --sidebar-accent-foreground: #e0e0e0;
+  --sidebar-border: #222222;
+  --sidebar-ring: #444444;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply text-foreground;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  html,
+  body,
+  #root {
+    background: transparent;
+    height: 100%;
+  }
+
+  ::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2e2e2e;
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3e3e3e;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2e2e2e transparent;
+  }
+
+  /**
+  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
+  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
+  */
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h4 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+}
+
+@layer components {
+  .hljs {
+    color: var(--foreground);
+    background: transparent;
+  }
+
+  .hljs-comment,
+  .hljs-quote {
+    color: #6d6d6d;
+    font-style: italic;
+  }
+
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-section,
+  .hljs-selector-id,
+  .hljs-template-tag,
+  .hljs-template-variable {
+    color: #c792ea;
+  }
+
+  .hljs-built_in,
+  .hljs-builtin-name,
+  .hljs-type,
+  .hljs-class .hljs-title {
+    color: #82aaff;
+  }
+
+  .hljs-string,
+  .hljs-symbol,
+  .hljs-bullet,
+  .hljs-addition {
+    color: #c3e88d;
+  }
+
+  .hljs-number,
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-meta,
+  .hljs-regexp,
+  .hljs-link {
+    color: #f78c6c;
+  }
+
+  .hljs-title,
+  .hljs-name,
+  .hljs-variable,
+  .hljs-template-variable,
+  .hljs-params {
+    color: #89ddff;
+  }
+
+  .hljs-function,
+  .hljs-title.function_ {
+    color: #82aaff;
+  }
+
+  .hljs-strong {
+    font-weight: 700;
+  }
+
+  .hljs-emphasis {
+    font-style: italic;
+  }
+
+  .hljs-deletion {
+    color: #ff5370;
+  }
+}
+
+* {
+  cursor: default !important;
+}
+
+button, [role="button"], a, input, select, textarea, [tabindex] {
+  cursor: default !important;
+}

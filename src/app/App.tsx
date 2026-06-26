@@ -1,0 +1,871 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Topbar } from "../components/Topbar";
+import { MainView } from "../components/MainView";
+import { SettingsView } from "../components/SettingsView";
+import type {
+  AudioTranscriptionUpdate,
+  AudioTranscriptionWord,
+  ContentBlock,
+  SettingsState,
+  WindowSnapPosition,
+  View,
+} from "../lib/types";
+import {
+  closeAppWindow,
+  captureScreenImage,
+  resizeAppWindow,
+  setAppClickThrough,
+  subscribeToAppShortcuts,
+  subscribeToWindowSnapPosition,
+} from "../lib/window-controls";
+import {
+  buildOpenRouterMessages,
+  detectAnswerIntent,
+  detectResumeRelevance,
+  normalizeWhitespace,
+  resolveOpenRouterModel,
+  streamOpenRouterAnswer,
+  type OpenRouterMemoryPair,
+} from "../lib/openrouter";
+import { streamGeminiAnalyzeScreenAnswer } from "../lib/analyze-screen";
+import { deleteStoredResume, loadStoredResume, uploadStoredResume } from "../lib/resume";
+import {
+  startAudioTranscription,
+  stopAudioTranscription,
+  subscribeToAudioTranscriptionUpdates,
+} from "../lib/audio-transcription-deepgram";
+import type { ResumeRecord } from "../lib/types";
+
+const DEFAULT_SETTINGS: SettingsState = {
+  deepgramApiKey:
+    typeof window === "undefined" ? "" : window.localStorage.getItem("dosa.deepgramApiKey") ?? "",
+  openrouterApiKey:
+    typeof window === "undefined" ? "" : window.localStorage.getItem("dosa.openrouterApiKey") ?? "",
+  openrouterModel:
+    typeof window === "undefined" ? "openrouter/free" : window.localStorage.getItem("dosa.openrouterModel") ?? "openrouter/free",
+  geminiApiKey:
+    typeof window === "undefined"
+      ? ""
+      : window.localStorage.getItem("dosa.geminiApiKey") ?? "",
+  transparency: 100,
+  appWidth:
+    typeof window === "undefined"
+      ? 980
+      : Math.min(
+          1000,
+          Math.max(760, Number(window.localStorage.getItem("dosa.appWidth") ?? "980") || 980)
+        ),
+  jobRole: "Software Engineer",
+  answerMemory: 5,
+  resumeUploaded: false,
+  resumeFileName: "",
+};
+
+export default function App() {
+  const [view, setView] = useState<View>("main");
+  const [blocks, setBlocks] = useState<ContentBlock[]>([]);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isAnswering, setIsAnswering] = useState(false);
+  const [activeTranscriptionId, setActiveTranscriptionId] = useState<number | null>(null);
+  const [activeAnswerId, setActiveAnswerId] = useState<number | null>(null);
+  const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
+  const [windowSnapPosition, setWindowSnapPosition] = useState<WindowSnapPosition>("center");
+  const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const lastRequestedHeight = useRef<number | null>(null);
+  const lastClickThrough = useRef<boolean | null>(null);
+  const currentAudioSessionId = useRef<number | null>(null);
+  const liveTranscriptBlockId = useRef<number | null>(null);
+  const committedTranscriptText = useRef("");
+  const transcriptResetBoundary = useRef("");
+  const transcriptBoundaryEnd = useRef<number | null>(null);
+  const latestTranscriptEnd = useRef<number | null>(null);
+  const answerAbortController = useRef<AbortController | null>(null);
+  const answerRawText = useRef("");
+  const answerMemory = useRef<OpenRouterMemoryPair[]>([]);
+  const resumeRecord = useRef<ResumeRecord | null>(null);
+  const shortcutHandlersRef = useRef({
+    listen: async () => {},
+    answer: () => {},
+    analyze: async () => {},
+    clear: () => {},
+  });
+
+  const idCounter = useRef(0);
+  const answerRunId = useRef(0);
+  const availableScreenHeight =
+    typeof window === "undefined" ? 0 : window.screen.availHeight || window.innerHeight;
+  const maxShellHeight = Math.max(120, availableScreenHeight - 48);
+  const maxWindowHeight = Math.max(120, availableScreenHeight);
+
+  useLayoutEffect(() => {
+    const node = rootRef.current;
+    if (!node || maxWindowHeight === 0) {
+      return;
+    }
+
+    const nextHeight = Math.min(Math.ceil(node.getBoundingClientRect().height), maxWindowHeight);
+
+    if (nextHeight <= 0 || lastRequestedHeight.current === nextHeight) {
+      return;
+    }
+
+    lastRequestedHeight.current = nextHeight;
+    resizeAppWindow(nextHeight);
+  }, [
+    view,
+    blocks,
+    isTranscribing,
+    isAnswering,
+    settings,
+    maxWindowHeight,
+  ]);
+
+  function nextId() {
+    return ++idCounter.current;
+  }
+
+  function getTranscriptDisplayText(currentSegment: string) {
+    return normalizeWhitespace(
+      [committedTranscriptText.current, currentSegment].filter(Boolean).join(" ")
+    );
+  }
+
+  function normalizeTranscriptToken(value: string) {
+    return value
+      .toLowerCase()
+      .replace(/^[^a-z0-9'#+.-]+|[^a-z0-9'#+.-]+$/gi, "");
+  }
+
+  function normalizeTranscriptWord(word: AudioTranscriptionWord) {
+    return normalizeTranscriptToken(word.word || "");
+  }
+
+  function stripTranscriptResetBoundary(text: string) {
+    const boundary = normalizeWhitespace(transcriptResetBoundary.current);
+    const normalizedText = normalizeWhitespace(text);
+
+    if (!boundary || !normalizedText) {
+      return normalizedText;
+    }
+
+    const boundaryTokens = boundary
+      .split(" ")
+      .map(normalizeTranscriptToken)
+      .filter(Boolean);
+    const textTokens = normalizedText.split(" ").filter(Boolean);
+
+    if (boundaryTokens.length === 0 || textTokens.length === 0) {
+      return normalizedText;
+    }
+
+    if (textTokens.length < boundaryTokens.length) {
+      return normalizedText;
+    }
+
+    for (let index = 0; index < boundaryTokens.length; index += 1) {
+      if (normalizeTranscriptToken(textTokens[index]) !== boundaryTokens[index]) {
+        return normalizedText;
+      }
+    }
+
+    return normalizeWhitespace(textTokens.slice(boundaryTokens.length).join(" "));
+  }
+
+  function getTranscriptTextFromEvent(event: Extract<AudioTranscriptionUpdate, { type: "transcript" }>) {
+    const boundaryEnd = transcriptBoundaryEnd.current;
+
+    if (boundaryEnd == null) {
+      return normalizeWhitespace(event.text);
+    }
+
+    const epsilon = 0.05;
+    const words = Array.isArray(event.words) ? event.words : [];
+
+    if (words.length > 0) {
+      const filteredWords = words.filter((word) => {
+        const wordEnd = typeof word.end === "number" ? word.end
+          : typeof word.start === "number" ? word.start
+            : null;
+        return wordEnd != null && wordEnd > boundaryEnd + epsilon;
+      });
+
+      if (filteredWords.length === 0) return "";
+
+      return normalizeWhitespace(
+        filteredWords
+          .map((word) => normalizeTranscriptWord(word))
+          .filter(Boolean)
+          .join(" ")
+      );
+    }
+
+    const eventEnd = typeof event.end === "number" ? event.end : null;
+
+    if (eventEnd != null && eventEnd <= boundaryEnd + epsilon) {
+      return "";
+    }
+
+    return "";
+  }
+
+  function getTranscriptSnapshot() {
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const block = blocks[index];
+      if (block.kind === "transcription" && block.text.trim().length > 0) {
+        return normalizeWhitespace(block.text);
+      }
+    }
+
+    return "";
+  }
+
+  function getLatestTranscriptQuestion(transcript: string) {
+    const cleaned = String(transcript || "").replace(/\r\n/g, "\n").trim();
+    if (!cleaned) {
+      return "";
+    }
+
+    const paragraphs = cleaned
+      .split(/\n+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const latestParagraph = paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : cleaned;
+    const sentences = latestParagraph
+      .split(/(?<=[.!?])\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    return normalizeWhitespace(sentences.length > 0 ? sentences[sentences.length - 1] : latestParagraph);
+  }
+
+  function stopActiveAnswerStream() {
+    answerRunId.current += 1;
+    answerAbortController.current?.abort();
+    answerAbortController.current = null;
+    answerRawText.current = "";
+  }
+
+  function writeAnswerText(blockId: number, text: string) {
+    setBlocks((prev) =>
+      prev.map((block) =>
+        block.kind === "answer" && block.id === blockId ? { ...block, text } : block
+      )
+    );
+  }
+
+  function finishAnswerSession(transcript: string, answer: string) {
+    const maxMemory = Math.max(0, settings.answerMemory);
+    const nextMemory = [...answerMemory.current, { transcript, answer }];
+    answerMemory.current = maxMemory > 0 ? nextMemory.slice(-maxMemory) : [];
+  }
+
+  function applyResumeRecord(record: ResumeRecord | null) {
+    resumeRecord.current = record;
+    setSettings((prev) => ({
+      ...prev,
+      resumeUploaded: Boolean(record),
+      resumeFileName: record?.fileName ?? "",
+    }));
+  }
+
+  function handleTranscriptUpdate(event: AudioTranscriptionUpdate) {
+    if (event.type !== "transcript") {
+      return false;
+    }
+
+    const eventEnd =
+      typeof event.end === "number"
+        ? event.end
+        : Array.isArray(event.words) && event.words.length > 0
+          ? event.words[event.words.length - 1]?.end ?? null
+          : null;
+
+    if (eventEnd != null) {
+      latestTranscriptEnd.current =
+        latestTranscriptEnd.current == null
+          ? eventEnd
+          : Math.max(latestTranscriptEnd.current, eventEnd);
+    }
+
+    const text = getTranscriptTextFromEvent(event);
+    if (!text) {
+      return true;
+    }
+
+    let existingId = liveTranscriptBlockId.current;
+
+    if (existingId == null) {
+      const id = nextId();
+      existingId = id;
+      liveTranscriptBlockId.current = id;
+      setActiveTranscriptionId(id);
+      setBlocks((prev) => [...prev, { kind: "transcription", id, text: "" }]);
+    }
+
+    const nextText = getTranscriptDisplayText(text);
+
+    if (event.isFinal) {
+      committedTranscriptText.current = nextText;
+    }
+
+    setBlocks((prev) =>
+      prev.map((block) =>
+        block.kind === "transcription" && block.id === existingId
+          ? { ...block, text: nextText }
+          : block
+      )
+    );
+
+    setActiveTranscriptionId(existingId);
+
+    setIsTranscribing(true);
+    return true;
+  }
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAudioTranscriptionUpdates((event) => {
+      if (event.sessionId != null && currentAudioSessionId.current !== event.sessionId) {
+        return;
+      }
+
+      if (handleTranscriptUpdate(event)) {
+        return;
+      }
+
+      if (event.type === "status") {
+        if (event.status === "running" || event.status === "starting") {
+          setIsTranscribing(true);
+        }
+
+      if (event.status === "error") {
+        setIsTranscribing(false);
+        setActiveTranscriptionId(null);
+        liveTranscriptBlockId.current = null;
+        committedTranscriptText.current = "";
+        transcriptResetBoundary.current = "";
+        transcriptBoundaryEnd.current = null;
+        latestTranscriptEnd.current = null;
+        currentAudioSessionId.current = null;
+      }
+
+        return;
+      }
+
+      if (event.type === "error") {
+        setIsTranscribing(false);
+        setActiveTranscriptionId(null);
+        liveTranscriptBlockId.current = null;
+        committedTranscriptText.current = "";
+        transcriptResetBoundary.current = "";
+        transcriptBoundaryEnd.current = null;
+        latestTranscriptEnd.current = null;
+        currentAudioSessionId.current = null;
+        return;
+      }
+
+      if (event.type === "stopped") {
+        setIsTranscribing(false);
+        setActiveTranscriptionId(null);
+        liveTranscriptBlockId.current = null;
+        committedTranscriptText.current = "";
+        transcriptResetBoundary.current = "";
+        transcriptBoundaryEnd.current = null;
+        latestTranscriptEnd.current = null;
+        currentAudioSessionId.current = null;
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const updateClickThrough = (enabled: boolean) => {
+      if (lastClickThrough.current === enabled) {
+        return;
+      }
+
+      lastClickThrough.current = enabled;
+      setAppClickThrough(enabled);
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const shell = shellRef.current;
+      if (!shell) {
+        updateClickThrough(true);
+        return;
+      }
+
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const isInsideShell = !!target && shell.contains(target);
+      updateClickThrough(!isInsideShell);
+    };
+
+    const handleBlur = () => updateClickThrough(true);
+
+    updateClickThrough(true);
+    document.addEventListener("mousemove", handleMouseMove, true);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove, true);
+      window.removeEventListener("blur", handleBlur);
+      updateClickThrough(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToWindowSnapPosition((event) => {
+      setWindowSnapPosition((prev) => (prev === event.position ? prev : event.position));
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAppShortcuts((event) => {
+      if (event.action === "listen") {
+        setView("main");
+        void shortcutHandlersRef.current.listen();
+        return;
+      }
+
+      if (event.action === "answer") {
+        setView("main");
+        void shortcutHandlersRef.current.answer();
+        return;
+      }
+
+      if (event.action === "analyze") {
+        setView("main");
+        void shortcutHandlersRef.current.analyze();
+        return;
+      }
+
+      if (event.action === "scroll-bottom") {
+        setScrollToBottomSignal((prev) => prev + 1);
+        return;
+      }
+
+      if (event.action === "clear") {
+        setView("main");
+        shortcutHandlersRef.current.clear();
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    void loadStoredResume().then((record) => {
+      applyResumeRecord(record);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void stopAudioTranscription();
+      stopActiveAnswerStream();
+    };
+  }, []);
+
+  function updateAnswerBlockText(blockId: number, text: string) {
+    setBlocks((prev) =>
+      prev.map((block) =>
+        block.kind === "answer" && block.id === blockId ? { ...block, text } : block
+      )
+    );
+  }
+
+  async function handleListen() {
+    if (isTranscribing) {
+      await stopAudioTranscription();
+      setIsTranscribing(false);
+      setActiveTranscriptionId(null);
+      liveTranscriptBlockId.current = null;
+      committedTranscriptText.current = "";
+      transcriptResetBoundary.current = "";
+      transcriptBoundaryEnd.current = null;
+      latestTranscriptEnd.current = null;
+      currentAudioSessionId.current = null;
+      return;
+    }
+
+    setIsTranscribing(true);
+    setActiveTranscriptionId(null);
+    liveTranscriptBlockId.current = null;
+    committedTranscriptText.current = "";
+    transcriptResetBoundary.current = "";
+    transcriptBoundaryEnd.current = null;
+    latestTranscriptEnd.current = null;
+
+    const started = await startAudioTranscription({
+      apiKey: settings.deepgramApiKey,
+    });
+    if (!started) {
+      setIsTranscribing(false);
+      return;
+    }
+
+    currentAudioSessionId.current = started.sessionId;
+
+    if (started.status === "error") {
+      setIsTranscribing(false);
+      setActiveTranscriptionId(null);
+      liveTranscriptBlockId.current = null;
+      committedTranscriptText.current = "";
+      transcriptResetBoundary.current = "";
+      transcriptBoundaryEnd.current = null;
+      latestTranscriptEnd.current = null;
+      currentAudioSessionId.current = null;
+    }
+  }
+
+  async function handleResumeUpload() {
+    const record = await uploadStoredResume();
+    if (record) {
+      applyResumeRecord(record);
+    }
+  }
+
+  async function handleResumeDelete() {
+    const deleted = await deleteStoredResume();
+    if (deleted) {
+      applyResumeRecord(null);
+    }
+  }
+
+  async function handleAnalyze() {
+    stopActiveAnswerStream();
+
+    const geminiApiKey = settings.geminiApiKey.trim();
+    const memoryLimit = Math.max(0, settings.answerMemory);
+    const memory = memoryLimit > 0 ? answerMemory.current.slice(-memoryLimit) : [];
+    const id = nextId();
+    const requestId = answerRunId.current;
+
+    setActiveAnswerId(id);
+    setIsAnswering(true);
+    setBlocks((prev) => [...prev, { kind: "answer", id, text: "" }]);
+
+    try {
+      if (!geminiApiKey) {
+        updateAnswerBlockText(
+          id,
+          "Add your Gemini API key in settings to analyze the screen."
+        );
+        return;
+      }
+
+      const screenshotDataUrl = await captureScreenImage();
+      if (answerRunId.current !== requestId) {
+        return;
+      }
+
+      if (!screenshotDataUrl) {
+        throw new Error(
+          "Could not capture the screen. Please try again after the app finishes redrawing."
+        );
+      }
+
+      const controller = new AbortController();
+      answerAbortController.current = controller;
+      answerRawText.current = "";
+
+      const { text } = await streamGeminiAnalyzeScreenAnswer({
+        apiKey: geminiApiKey,
+        jobRole: settings.jobRole,
+        memory,
+        screenshotDataUrl,
+        signal: controller.signal,
+        onTextChunk: (chunk) => {
+          if (answerRunId.current !== requestId) {
+            return;
+          }
+
+          answerRawText.current += chunk;
+          updateAnswerBlockText(id, answerRawText.current);
+        },
+        onAttemptReset: () => {
+          if (answerRunId.current !== requestId) {
+            return;
+          }
+
+          answerRawText.current = "";
+          updateAnswerBlockText(id, "");
+        },
+      });
+
+      if (answerRunId.current !== requestId) {
+        return;
+      }
+
+      const finalAnswer = text || answerRawText.current;
+      updateAnswerBlockText(id, finalAnswer || "Gemini returned an empty response.");
+    } catch (error) {
+      if (answerRunId.current !== requestId) {
+        return;
+      }
+
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "All Gemini models are currently busy, please try again in a moment.") {
+        updateAnswerBlockText(id, message);
+        return;
+      }
+
+      updateAnswerBlockText(id, `Analyze Screen failed: ${message}`);
+    } finally {
+      if (answerRunId.current !== requestId) {
+        return;
+      }
+
+      answerAbortController.current = null;
+      answerRawText.current = "";
+      setIsAnswering(false);
+      setActiveAnswerId(null);
+    }
+  }
+
+  function handleAnswer() {
+    stopActiveAnswerStream();
+
+    const transcriptText = getTranscriptSnapshot();
+    const latestTranscriptText = getLatestTranscriptQuestion(transcriptText) || transcriptText;
+    const apiKey = settings.openrouterApiKey.trim();
+    const resolvedModel = resolveOpenRouterModel(settings.openrouterModel);
+    const memoryLimit = Math.max(0, settings.answerMemory);
+    const memory = memoryLimit > 0 ? answerMemory.current.slice(-memoryLimit) : [];
+    const intent = detectAnswerIntent(latestTranscriptText, memory);
+    const resumeRelevant = detectResumeRelevance(latestTranscriptText);
+    const resume = resumeRelevant ? resumeRecord.current : null;
+    const transcriptionSeparatorId = nextId();
+    const answerId = nextId();
+
+    transcriptResetBoundary.current = latestTranscriptText;
+    transcriptBoundaryEnd.current = latestTranscriptEnd.current;
+    liveTranscriptBlockId.current = null;
+    committedTranscriptText.current = "";
+    setActiveTranscriptionId(null);
+    setBlocks((prev) => [
+      ...prev,
+      { kind: "transcription", id: transcriptionSeparatorId, text: "" },
+      { kind: "answer", id: answerId, text: "" },
+    ]);
+
+    setActiveAnswerId(answerId);
+    setIsAnswering(true);
+
+    if (!apiKey) {
+      updateAnswerBlockText(
+        answerId,
+        "Add your OpenRouter API key in settings to generate answers."
+      );
+      setIsAnswering(false);
+      setActiveAnswerId(null);
+      return;
+    }
+
+    if (!transcriptText) {
+      updateAnswerBlockText(
+        answerId,
+        "Start listening first so I have some transcript to answer from."
+      );
+      setIsAnswering(false);
+      setActiveAnswerId(null);
+      return;
+    }
+
+    if (resumeRelevant && !resume) {
+      updateAnswerBlockText(
+        answerId,
+        "Upload your resume in settings so I can answer resume-related questions from your actual background."
+      );
+      setIsAnswering(false);
+      setActiveAnswerId(null);
+      return;
+    }
+
+    const requestId = answerRunId.current;
+    const controller = new AbortController();
+    answerAbortController.current = controller;
+    answerRawText.current = "";
+
+    const messages = buildOpenRouterMessages({
+      transcript: latestTranscriptText,
+      memory,
+      jobRole: settings.jobRole,
+      intent,
+      resume,
+      resumeRelevant,
+    });
+
+    void streamOpenRouterAnswer({
+      apiKey,
+      model: resolvedModel,
+      messages,
+      signal: controller.signal,
+      onTextChunk: (chunk) => {
+        if (answerRunId.current !== requestId) {
+          return;
+        }
+
+        answerRawText.current += chunk;
+        updateAnswerBlockText(answerId, answerRawText.current);
+      },
+    })
+      .then(({ text }) => {
+        if (answerRunId.current !== requestId) {
+          return;
+        }
+
+        const finalAnswer = text || answerRawText.current;
+        updateAnswerBlockText(
+          answerId,
+          finalAnswer || "OpenRouter returned an empty response."
+        );
+
+        if (finalAnswer) {
+          finishAnswerSession(latestTranscriptText, finalAnswer);
+        }
+      })
+      .catch((error: unknown) => {
+        if (answerRunId.current !== requestId) {
+          return;
+        }
+
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        updateAnswerBlockText(answerId, `OpenRouter request failed: ${message}`);
+      })
+      .finally(() => {
+        if (answerRunId.current !== requestId) {
+          return;
+        }
+
+        answerAbortController.current = null;
+        answerRawText.current = "";
+        setIsAnswering(false);
+        setActiveAnswerId(null);
+      });
+  }
+
+  function handleClear() {
+    stopActiveAnswerStream();
+    answerMemory.current = [];
+    void stopAudioTranscription();
+    currentAudioSessionId.current = null;
+    liveTranscriptBlockId.current = null;
+    committedTranscriptText.current = "";
+    transcriptResetBoundary.current = "";
+    transcriptBoundaryEnd.current = null;
+    latestTranscriptEnd.current = null;
+    setBlocks([]);
+    setIsTranscribing(false);
+    setIsAnswering(false);
+    setActiveTranscriptionId(null);
+    setActiveAnswerId(null);
+  }
+
+  shortcutHandlersRef.current = {
+    listen: handleListen,
+    answer: handleAnswer,
+    analyze: handleAnalyze,
+    clear: handleClear,
+  };
+
+  const shellAlignmentClass =
+    windowSnapPosition === "left"
+      ? "justify-start px-0"
+      : windowSnapPosition === "right"
+        ? "justify-end px-0"
+        : "justify-center px-4";
+
+  function handleSettingChange<K extends keyof SettingsState>(
+    key: K,
+    value: SettingsState[K]
+  ) {
+    if (typeof value === "string") {
+      if (key === "deepgramApiKey") {
+        window.localStorage.setItem("dosa.deepgramApiKey", value);
+      }
+
+      if (key === "openrouterApiKey") {
+        window.localStorage.setItem("dosa.openrouterApiKey", value);
+      }
+
+      if (key === "openrouterModel") {
+        window.localStorage.setItem("dosa.openrouterModel", value);
+      }
+
+      if (key === "geminiApiKey") {
+        window.localStorage.setItem("dosa.geminiApiKey", value);
+      }
+    }
+
+    if (key === "appWidth" && typeof value === "number") {
+      window.localStorage.setItem("dosa.appWidth", String(value));
+    }
+
+    if (key === "answerMemory" && typeof value === "number") {
+      const nextLimit = Math.max(0, value);
+      answerMemory.current = nextLimit > 0 ? answerMemory.current.slice(-nextLimit) : [];
+    }
+
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className={`bg-transparent flex items-start pt-12 overflow-hidden ${shellAlignmentClass}`}
+    >
+      <div
+        ref={shellRef}
+        className="w-full bg-background border border-border flex flex-col overflow-hidden"
+        style={{
+          width: `min(${settings.appWidth}px, calc(100vw - 32px))`,
+          opacity: settings.transparency / 100,
+          maxHeight: `${maxShellHeight}px`,
+        }}
+      >
+        <Topbar
+          view={view}
+          resumeUploaded={settings.resumeUploaded}
+          onSettings={() => setView("settings")}
+          onBack={() => setView("main")}
+          onClose={closeAppWindow}
+        />
+
+        {view === "main" ? (
+          <MainView
+            blocks={blocks}
+            isTranscribing={isTranscribing}
+            isAnswering={isAnswering}
+          activeTranscriptionId={activeTranscriptionId}
+          activeAnswerId={activeAnswerId}
+          scrollToBottomSignal={scrollToBottomSignal}
+          onListen={handleListen}
+          onAnswer={handleAnswer}
+          onClear={handleClear}
+            onAnalyze={handleAnalyze}
+          />
+        ) : (
+        <SettingsView
+          settings={settings}
+          onChange={handleSettingChange}
+          onResumeUpload={handleResumeUpload}
+          onResumeDelete={handleResumeDelete}
+        />
+      )}
+      </div>
+    </div>
+  );
+}
