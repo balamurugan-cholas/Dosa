@@ -1,4 +1,4 @@
-[![Download](https://img.shields.io/github/v/release/balamurugan-cholas/dosa?label=Download&style=flat-square)](https://github.com/balamurugan-cholas/dosa/releases/latest) — [Click here to download the latest release]([https://github.com/balamurugan-cholas/dosa/releases/latest](https://github.com/balamurugan-cholas/Dosa/releases/download/0.0.1/Dosa.Setup.0.0.1.exe))
+[![Download](https://img.shields.io/github/v/release/balamurugan-cholas/dosa?label=Download&style=flat-square)](https://github.com/balamurugan-cholas/Dosa/releases/download/0.0.1/Dosa.Setup.0.0.1.exe) — [Click here to download the latest release](https://github.com/balamurugan-cholas/Dosa/releases/download/0.0.1/Dosa.Setup.0.0.1.exe)
 
 # Dosa — Real-Time Interview Assistant
 
