@@ -25,7 +25,7 @@ A lightweight, Invisible to interviewer, always-on-top desktop app that listens 
 
 ## Screenshots
 
-<img width="49%" alt="Main View" src="https://github.com/user-attachments/assets/1f73166d-321e-41db-838c-9ce70067dad6" />
+<img width="49%" alt="Main View" src="https://github.com/user-attachments/assets/57c55448-acff-435c-b093-08e7db4c55a6" />
 <img width="49%" alt="Settings View" src="https://github.com/user-attachments/assets/f2440a92-2a28-4d2c-8437-6c81bce619be" />
 
 ---
