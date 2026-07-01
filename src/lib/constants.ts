@@ -556,6 +556,8 @@ export const SHORTCUTS: [string, string][] = [
   ["Start / Stop Listening", "Alt+Q"],
   ["Get Answer", "Alt+W"],
   ["Analyze Screen", "Alt+Enter"],
+  ["prev-answer", "Alt+Left"],
+  ["next-answer", "Alt+Right"],
   ["Scroll to Bottom", "Alt+Down"],
   ["Clear", "Alt+C"],
   ["Toggle App", "Alt+X"],

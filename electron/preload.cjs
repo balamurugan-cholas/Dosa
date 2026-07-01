@@ -6,6 +6,10 @@ const windowSnapPositionListeners = new Map();
 let nextWindowSnapPositionListenerId = 1;
 const appShortcutListeners = new Map();
 let nextAppShortcutListenerId = 1;
+const updateAvailableListeners = new Map();
+let nextUpdateAvailableListenerId = 1;
+const downloadProgressListeners = new Map();
+let nextDownloadProgressListenerId = 1;
 
 ipcRenderer.on("audio-transcription:update", (_event, payload) => {
   for (const listener of audioTranscriptionListeners.values()) {
@@ -33,6 +37,26 @@ ipcRenderer.on("app:shortcut", (_event, payload) => {
       listener(payload);
     } catch (error) {
       console.error("[preload] app shortcut listener failed:", error);
+    }
+  }
+});
+
+ipcRenderer.on("app:update-available", (_event, payload) => {
+  for (const listener of updateAvailableListeners.values()) {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error("[preload] update available listener failed:", error);
+    }
+  }
+});
+
+ipcRenderer.on("app:update-download-progress", (_event, payload) => {
+  for (const listener of downloadProgressListeners.values()) {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error("[preload] update download progress listener failed:", error);
     }
   }
 });
@@ -81,4 +105,28 @@ contextBridge.exposeInMainWorld("resumeStore", {
   load: () => ipcRenderer.invoke("resume:load"),
   upload: () => ipcRenderer.invoke("resume:upload"),
   remove: () => ipcRenderer.invoke("resume:delete"),
+});
+
+contextBridge.exposeInMainWorld("appUpdater", {
+  getInfo: () => ipcRenderer.invoke("app:get-update-info"),
+  getDownloadStatus: () => ipcRenderer.invoke("app:get-download-status"),
+  openUpdateUrl: () => ipcRenderer.send("app:open-update-url"),
+  startDownload: () => ipcRenderer.send("app:start-update-download"),
+  runInstaller: () => ipcRenderer.send("app:run-installer"),
+  onUpdateAvailable: (listener) => {
+    const subscriptionId = nextUpdateAvailableListenerId++;
+    updateAvailableListeners.set(subscriptionId, listener);
+    return subscriptionId;
+  },
+  offUpdateAvailable: (subscriptionId) => {
+    updateAvailableListeners.delete(Number(subscriptionId));
+  },
+  onDownloadProgress: (listener) => {
+    const subscriptionId = nextDownloadProgressListenerId++;
+    downloadProgressListeners.set(subscriptionId, listener);
+    return subscriptionId;
+  },
+  offDownloadProgress: (subscriptionId) => {
+    downloadProgressListeners.delete(Number(subscriptionId));
+  },
 });

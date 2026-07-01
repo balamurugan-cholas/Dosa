@@ -16,7 +16,36 @@ function createIdleState() {
   };
 }
 
-function createDeepgramUrl() {
+function getKeytermsForRole(jobRole = "") {
+  const common = ["API", "REST", "GraphQL", "Docker", "Kubernetes", "CI/CD", "microservices"];
+  const role = jobRole.toLowerCase();
+
+  if (role.includes("software") || role.includes("engineer") || role.includes("developer")) {
+    return [...common, "React", "TypeScript", "Node.js", "PostgreSQL", "Redis", "AWS", "Git"];
+  }
+  if (role.includes("data")) {
+    return [...common, "Python", "pandas", "NumPy", "TensorFlow", "PyTorch", "SQL", "ETL"];
+  }
+  if (role.includes("devops") || role.includes("platform")) {
+    return [...common, "Terraform", "Ansible", "Prometheus", "Grafana", "Helm", "Jenkins"];
+  }
+  if (role.includes("frontend") || role.includes("front-end") || role.includes("ui")) {
+    return [...common, "React", "Vue", "CSS", "Tailwind", "Webpack", "Vite", "TypeScript"];
+  }
+  if (role.includes("backend") || role.includes("back-end")) {
+    return [...common, "Node.js", "PostgreSQL", "MongoDB", "Redis", "Express", "Prisma", "AWS"];
+  }
+  if (role.includes("mobile") || role.includes("ios") || role.includes("android")) {
+    return [...common, "React Native", "Swift", "Kotlin", "Xcode", "Android Studio", "Firebase"];
+  }
+  if (role.includes("machine learning") || role.includes("ml") || role.includes("ai")) {
+    return [...common, "Python", "TensorFlow", "PyTorch", "scikit-learn", "LLM", "fine-tuning", "embeddings"];
+  }
+
+  return common;
+}
+
+function createDeepgramUrl(options = {}) {
   const params = new URLSearchParams({
     model: "nova-3",
     language: "en-US",
@@ -26,14 +55,19 @@ function createDeepgramUrl() {
     interim_results: "true",
     smart_format: "true",
     punctuate: "true",
-    endpointing: "300",        // increased from 150 — more patient with Zoom's compression pauses
-    utterance_end_ms: "1500",  // increased from 1000 — gives more time to finalize
-    filler_words: "false",     // ignore uh/um from compression artifacts
-    profanity_filter: "false", // don't filter anything that might be misread
-    diarize: "false",          // single speaker, no overhead
-    numerals: "true",          // convert spoken numbers to digits
-    no_delay: "true",          // minimize buffering latency
+    endpointing: "300",
+    utterance_end_ms: "1500",
+    filler_words: "false",
+    profanity_filter: "false",
+    diarize: "false",
+    numerals: "true",
+    no_delay: "true",
   });
+
+  const keyterms = getKeytermsForRole(options.jobRole);
+  for (const term of keyterms) {
+    params.append("keyterm", term);
+  }
 
   return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 }
@@ -118,7 +152,7 @@ class AudioTranscriptionManager extends EventEmitter {
     };
     this.emit("update", { type: "status", ...this.state });
 
-    const socket = new WebSocket(createDeepgramUrl(), {
+    const socket = new WebSocket(createDeepgramUrl({ jobRole: options.jobRole }), {
       headers: {
         Authorization: `Token ${apiKey}`,
       },

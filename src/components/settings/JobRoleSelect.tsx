@@ -95,6 +95,18 @@ export function JobRoleSelect({ value, onChange, options }: Props) {
         )
     : options;
 
+  const trimmedQuery = query.trim();
+  const hasExactMatch = options.some(
+    (option) => normalizeSearchText(option) === normalizeSearchText(trimmedQuery)
+  );
+  const showCustomOption = trimmedQuery.length > 0 && !hasExactMatch;
+
+  function commitCustomRole() {
+    if (!trimmedQuery) return;
+    onChange(trimmedQuery);
+    setOpen(false);
+  }
+
   useEffect(() => {
     if (!open) {
       setQuery("");
@@ -147,6 +159,10 @@ export function JobRoleSelect({ value, onChange, options }: Props) {
                     if (event.key === "Escape") {
                       setOpen(false);
                     }
+                    if (event.key === "Enter" && showCustomOption) {
+                      event.preventDefault();
+                      commitCustomRole();
+                    }
                   }}
                   placeholder="Search roles..."
                   className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/70"
@@ -155,6 +171,14 @@ export function JobRoleSelect({ value, onChange, options }: Props) {
             </div>
 
             <div className="max-h-44 overflow-y-auto">
+              {showCustomOption && (
+                <button
+                  onClick={commitCustomRole}
+                  className="w-full text-left text-xs px-2.5 py-[6px] transition-colors hover:bg-accent text-foreground border-b border-border"
+                >
+                  {trimmedQuery}
+                </button>
+              )}
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((opt) => (
                   <button
@@ -170,11 +194,11 @@ export function JobRoleSelect({ value, onChange, options }: Props) {
                     {opt}
                   </button>
                 ))
-              ) : (
+              ) : !showCustomOption ? (
                 <div className="px-2.5 py-3 text-xs text-muted-foreground">
                   No matching job roles.
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}

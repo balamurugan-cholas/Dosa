@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Topbar } from "../components/Topbar";
 import { MainView } from "../components/MainView";
 import { SettingsView } from "../components/SettingsView";
+import { UpdateView } from "../components/UpdateView";
 import type {
   AudioTranscriptionUpdate,
   AudioTranscriptionWord,
@@ -9,6 +10,8 @@ import type {
   SettingsState,
   WindowSnapPosition,
   View,
+  UpdateInfo,
+  UpdateDownloadProgress,
 } from "../lib/types";
 import {
   closeAppWindow,
@@ -71,6 +74,17 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [windowSnapPosition, setWindowSnapPosition] = useState<WindowSnapPosition>("center");
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
+  const [answerIndex, setAnswerIndex] = useState(0);
+  const [autoAnswer, setAutoAnswer] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<UpdateDownloadProgress | null>(null);
+  const autoAnswerRef = useRef(false);
+  const autoAnswerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoAnswerRetryCount = useRef(0);
+  const MAX_AUTO_ANSWER_RETRIES = 10;
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const lastRequestedHeight = useRef<number | null>(null);
@@ -101,26 +115,14 @@ export default function App() {
 
   useLayoutEffect(() => {
     const node = rootRef.current;
-    if (!node || maxWindowHeight === 0) {
-      return;
-    }
+    if (!node || maxWindowHeight === 0) return;
 
     const nextHeight = Math.min(Math.ceil(node.getBoundingClientRect().height), maxWindowHeight);
-
-    if (nextHeight <= 0 || lastRequestedHeight.current === nextHeight) {
-      return;
-    }
+    if (nextHeight <= 0 || lastRequestedHeight.current === nextHeight) return;
 
     lastRequestedHeight.current = nextHeight;
     resizeAppWindow(nextHeight);
-  }, [
-    view,
-    blocks,
-    isTranscribing,
-    isAnswering,
-    settings,
-    maxWindowHeight,
-  ]);
+  }, [view, blocks, isTranscribing, isAnswering, settings, maxWindowHeight, answerIndex]);
 
   function nextId() {
     return ++idCounter.current;
@@ -146,23 +148,13 @@ export default function App() {
     const boundary = normalizeWhitespace(transcriptResetBoundary.current);
     const normalizedText = normalizeWhitespace(text);
 
-    if (!boundary || !normalizedText) {
-      return normalizedText;
-    }
+    if (!boundary || !normalizedText) return normalizedText;
 
-    const boundaryTokens = boundary
-      .split(" ")
-      .map(normalizeTranscriptToken)
-      .filter(Boolean);
+    const boundaryTokens = boundary.split(" ").map(normalizeTranscriptToken).filter(Boolean);
     const textTokens = normalizedText.split(" ").filter(Boolean);
 
-    if (boundaryTokens.length === 0 || textTokens.length === 0) {
-      return normalizedText;
-    }
-
-    if (textTokens.length < boundaryTokens.length) {
-      return normalizedText;
-    }
+    if (boundaryTokens.length === 0 || textTokens.length === 0) return normalizedText;
+    if (textTokens.length < boundaryTokens.length) return normalizedText;
 
     for (let index = 0; index < boundaryTokens.length; index += 1) {
       if (normalizeTranscriptToken(textTokens[index]) !== boundaryTokens[index]) {
@@ -176,9 +168,7 @@ export default function App() {
   function getTranscriptTextFromEvent(event: Extract<AudioTranscriptionUpdate, { type: "transcript" }>) {
     const boundaryEnd = transcriptBoundaryEnd.current;
 
-    if (boundaryEnd == null) {
-      return normalizeWhitespace(event.text);
-    }
+    if (boundaryEnd == null) return normalizeWhitespace(event.text);
 
     const epsilon = 0.05;
     const words = Array.isArray(event.words) ? event.words : [];
@@ -194,18 +184,12 @@ export default function App() {
       if (filteredWords.length === 0) return "";
 
       return normalizeWhitespace(
-        filteredWords
-          .map((word) => normalizeTranscriptWord(word))
-          .filter(Boolean)
-          .join(" ")
+        filteredWords.map((word) => normalizeTranscriptWord(word)).filter(Boolean).join(" ")
       );
     }
 
     const eventEnd = typeof event.end === "number" ? event.end : null;
-
-    if (eventEnd != null && eventEnd <= boundaryEnd + epsilon) {
-      return "";
-    }
+    if (eventEnd != null && eventEnd <= boundaryEnd + epsilon) return "";
 
     return "";
   }
@@ -217,25 +201,16 @@ export default function App() {
         return normalizeWhitespace(block.text);
       }
     }
-
     return "";
   }
 
   function getLatestTranscriptQuestion(transcript: string) {
     const cleaned = String(transcript || "").replace(/\r\n/g, "\n").trim();
-    if (!cleaned) {
-      return "";
-    }
+    if (!cleaned) return "";
 
-    const paragraphs = cleaned
-      .split(/\n+/)
-      .map((part) => part.trim())
-      .filter(Boolean);
+    const paragraphs = cleaned.split(/\n+/).map((part) => part.trim()).filter(Boolean);
     const latestParagraph = paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : cleaned;
-    const sentences = latestParagraph
-      .split(/(?<=[.!?])\s+/)
-      .map((part) => part.trim())
-      .filter(Boolean);
+    const sentences = latestParagraph.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
 
     return normalizeWhitespace(sentences.length > 0 ? sentences[sentences.length - 1] : latestParagraph);
   }
@@ -245,14 +220,10 @@ export default function App() {
     answerAbortController.current?.abort();
     answerAbortController.current = null;
     answerRawText.current = "";
-  }
-
-  function writeAnswerText(blockId: number, text: string) {
-    setBlocks((prev) =>
-      prev.map((block) =>
-        block.kind === "answer" && block.id === blockId ? { ...block, text } : block
-      )
-    );
+    if (autoAnswerTimer.current) {
+      clearTimeout(autoAnswerTimer.current);
+      autoAnswerTimer.current = null;
+    }
   }
 
   function finishAnswerSession(transcript: string, answer: string) {
@@ -271,9 +242,7 @@ export default function App() {
   }
 
   function handleTranscriptUpdate(event: AudioTranscriptionUpdate) {
-    if (event.type !== "transcript") {
-      return false;
-    }
+    if (event.type !== "transcript") return false;
 
     const eventEnd =
       typeof event.end === "number"
@@ -290,9 +259,7 @@ export default function App() {
     }
 
     const text = getTranscriptTextFromEvent(event);
-    if (!text) {
-      return true;
-    }
+    if (!text) return true;
 
     let existingId = liveTranscriptBlockId.current;
 
@@ -308,6 +275,14 @@ export default function App() {
 
     if (event.isFinal) {
       committedTranscriptText.current = nextText;
+
+      if (autoAnswerRef.current) {
+        if (autoAnswerTimer.current) clearTimeout(autoAnswerTimer.current);
+        autoAnswerTimer.current = setTimeout(() => {
+          autoAnswerTimer.current = null;
+          shortcutHandlersRef.current.answer();
+        }, 2000);
+      }
     }
 
     setBlocks((prev) =>
@@ -319,36 +294,31 @@ export default function App() {
     );
 
     setActiveTranscriptionId(existingId);
-
     setIsTranscribing(true);
     return true;
   }
 
   useEffect(() => {
     const unsubscribe = subscribeToAudioTranscriptionUpdates((event) => {
-      if (event.sessionId != null && currentAudioSessionId.current !== event.sessionId) {
-        return;
-      }
+      if (event.sessionId != null && currentAudioSessionId.current !== event.sessionId) return;
 
-      if (handleTranscriptUpdate(event)) {
-        return;
-      }
+      if (handleTranscriptUpdate(event)) return;
 
       if (event.type === "status") {
         if (event.status === "running" || event.status === "starting") {
           setIsTranscribing(true);
         }
 
-      if (event.status === "error") {
-        setIsTranscribing(false);
-        setActiveTranscriptionId(null);
-        liveTranscriptBlockId.current = null;
-        committedTranscriptText.current = "";
-        transcriptResetBoundary.current = "";
-        transcriptBoundaryEnd.current = null;
-        latestTranscriptEnd.current = null;
-        currentAudioSessionId.current = null;
-      }
+        if (event.status === "error") {
+          setIsTranscribing(false);
+          setActiveTranscriptionId(null);
+          liveTranscriptBlockId.current = null;
+          committedTranscriptText.current = "";
+          transcriptResetBoundary.current = "";
+          transcriptBoundaryEnd.current = null;
+          latestTranscriptEnd.current = null;
+          currentAudioSessionId.current = null;
+        }
 
         return;
       }
@@ -382,21 +352,14 @@ export default function App() {
 
   useEffect(() => {
     const updateClickThrough = (enabled: boolean) => {
-      if (lastClickThrough.current === enabled) {
-        return;
-      }
-
+      if (lastClickThrough.current === enabled) return;
       lastClickThrough.current = enabled;
       setAppClickThrough(enabled);
     };
 
     const handleMouseMove = (event: MouseEvent) => {
       const shell = shellRef.current;
-      if (!shell) {
-        updateClickThrough(true);
-        return;
-      }
-
+      if (!shell) { updateClickThrough(true); return; }
       const target = document.elementFromPoint(event.clientX, event.clientY);
       const isInsideShell = !!target && shell.contains(target);
       updateClickThrough(!isInsideShell);
@@ -419,48 +382,75 @@ export default function App() {
     const unsubscribe = subscribeToWindowSnapPosition((event) => {
       setWindowSnapPosition((prev) => (prev === event.position ? prev : event.position));
     });
-
     return unsubscribe;
   }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeToAppShortcuts((event) => {
-      if (event.action === "listen") {
-        setView("main");
-        void shortcutHandlersRef.current.listen();
+      if (event.action === "listen") { setView("main"); void shortcutHandlersRef.current.listen(); return; }
+      if (event.action === "answer") { setView("main"); void shortcutHandlersRef.current.answer(); return; }
+      if (event.action === "analyze") { setView("main"); void shortcutHandlersRef.current.analyze(); return; }
+      if (event.action === "scroll-bottom") { setScrollToBottomSignal((prev) => prev + 1); return; }
+      if (event.action === "clear") { setView("main"); shortcutHandlersRef.current.clear(); return; }
+      if (event.action === "prev-answer") { setAnswerIndex((prev) => Math.max(0, prev - 1)); return; }
+      if (event.action === "next-answer") {
+        setBlocks((prev) => {
+          const count = prev.filter((b) => b.kind === "answer").length;
+          setAnswerIndex((i) => Math.min(count - 1, i + 1));
+          return prev;
+        });
         return;
-      }
-
-      if (event.action === "answer") {
-        setView("main");
-        void shortcutHandlersRef.current.answer();
-        return;
-      }
-
-      if (event.action === "analyze") {
-        setView("main");
-        void shortcutHandlersRef.current.analyze();
-        return;
-      }
-
-      if (event.action === "scroll-bottom") {
-        setScrollToBottomSignal((prev) => prev + 1);
-        return;
-      }
-
-      if (event.action === "clear") {
-        setView("main");
-        shortcutHandlersRef.current.clear();
       }
     });
-
     return unsubscribe;
   }, []);
 
   useEffect(() => {
-    void loadStoredResume().then((record) => {
-      applyResumeRecord(record);
+    void loadStoredResume().then((record) => { applyResumeRecord(record); });
+  }, []);
+
+  useEffect(() => {
+    const appUpdater = (window as any).appUpdater;
+    if (!appUpdater) return;
+
+    void appUpdater.getInfo().then((info: UpdateInfo | null) => {
+      if (info?.version) {
+        setUpdateAvailable(true);
+        setUpdateVersion(info.version);
+        setUpdateInfo(info);
+
+        void appUpdater.getDownloadStatus?.().then((status: UpdateDownloadProgress | null) => {
+          if (status) setDownloadProgress(status);
+        });
+      }
     });
+
+    const subscriptionId = appUpdater.onUpdateAvailable((info: UpdateInfo) => {
+      setUpdateAvailable(true);
+      setUpdateVersion(info.version);
+      setUpdateInfo(info);
+
+      void appUpdater.getDownloadStatus?.().then((status: UpdateDownloadProgress | null) => {
+        if (status) setDownloadProgress(status);
+      });
+    });
+
+    return () => {
+      appUpdater.offUpdateAvailable(subscriptionId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const appUpdater = (window as any).appUpdater;
+    if (!appUpdater?.onDownloadProgress) return;
+
+    const subscriptionId = appUpdater.onDownloadProgress((progress: UpdateDownloadProgress) => {
+      setDownloadProgress(progress);
+    });
+
+    return () => {
+      appUpdater.offDownloadProgress?.(subscriptionId);
+    };
   }, []);
 
   useEffect(() => {
@@ -502,6 +492,7 @@ export default function App() {
 
     const started = await startAudioTranscription({
       apiKey: settings.deepgramApiKey,
+      jobRole: settings.jobRole,
     });
     if (!started) {
       setIsTranscribing(false);
@@ -524,16 +515,12 @@ export default function App() {
 
   async function handleResumeUpload() {
     const record = await uploadStoredResume();
-    if (record) {
-      applyResumeRecord(record);
-    }
+    if (record) applyResumeRecord(record);
   }
 
   async function handleResumeDelete() {
     const deleted = await deleteStoredResume();
-    if (deleted) {
-      applyResumeRecord(null);
-    }
+    if (deleted) applyResumeRecord(null);
   }
 
   async function handleAnalyze() {
@@ -545,28 +532,25 @@ export default function App() {
     const id = nextId();
     const requestId = answerRunId.current;
 
+    setBlocks((prev) => {
+      const currentAnswerCount = prev.filter((b) => b.kind === "answer").length;
+      setAnswerIndex(currentAnswerCount);
+      return [...prev, { kind: "answer", id, text: "" }];
+    });
     setActiveAnswerId(id);
     setIsAnswering(true);
-    setBlocks((prev) => [...prev, { kind: "answer", id, text: "" }]);
 
     try {
       if (!geminiApiKey) {
-        updateAnswerBlockText(
-          id,
-          "Add your Gemini API key in settings to analyze the screen."
-        );
+        updateAnswerBlockText(id, "Add your Gemini API key in settings to analyze the screen.");
         return;
       }
 
       const screenshotDataUrl = await captureScreenImage();
-      if (answerRunId.current !== requestId) {
-        return;
-      }
+      if (answerRunId.current !== requestId) return;
 
       if (!screenshotDataUrl) {
-        throw new Error(
-          "Could not capture the screen. Please try again after the app finishes redrawing."
-        );
+        throw new Error("Could not capture the screen. Please try again after the app finishes redrawing.");
       }
 
       const controller = new AbortController();
@@ -580,37 +564,24 @@ export default function App() {
         screenshotDataUrl,
         signal: controller.signal,
         onTextChunk: (chunk) => {
-          if (answerRunId.current !== requestId) {
-            return;
-          }
-
+          if (answerRunId.current !== requestId) return;
           answerRawText.current += chunk;
           updateAnswerBlockText(id, answerRawText.current);
         },
         onAttemptReset: () => {
-          if (answerRunId.current !== requestId) {
-            return;
-          }
-
+          if (answerRunId.current !== requestId) return;
           answerRawText.current = "";
           updateAnswerBlockText(id, "");
         },
       });
 
-      if (answerRunId.current !== requestId) {
-        return;
-      }
+      if (answerRunId.current !== requestId) return;
 
       const finalAnswer = text || answerRawText.current;
       updateAnswerBlockText(id, finalAnswer || "Gemini returned an empty response.");
     } catch (error) {
-      if (answerRunId.current !== requestId) {
-        return;
-      }
-
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
+      if (answerRunId.current !== requestId) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
 
       const message = error instanceof Error ? error.message : String(error);
       if (message === "All Gemini models are currently busy, please try again in a moment.") {
@@ -620,10 +591,7 @@ export default function App() {
 
       updateAnswerBlockText(id, `Analyze Screen failed: ${message}`);
     } finally {
-      if (answerRunId.current !== requestId) {
-        return;
-      }
-
+      if (answerRunId.current !== requestId) return;
       answerAbortController.current = null;
       answerRawText.current = "";
       setIsAnswering(false);
@@ -632,6 +600,7 @@ export default function App() {
   }
 
   function handleAnswer() {
+    if (isAnswering) return;
     stopActiveAnswerStream();
 
     const transcriptText = getTranscriptSnapshot();
@@ -651,44 +620,36 @@ export default function App() {
     liveTranscriptBlockId.current = null;
     committedTranscriptText.current = "";
     setActiveTranscriptionId(null);
-    setBlocks((prev) => [
-      ...prev,
-      { kind: "transcription", id: transcriptionSeparatorId, text: "" },
-      { kind: "answer", id: answerId, text: "" },
-    ]);
+
+    setBlocks((prev) => {
+      const currentAnswerCount = prev.filter((b) => b.kind === "answer").length;
+      setAnswerIndex(currentAnswerCount);
+      return [
+        ...prev,
+        { kind: "transcription", id: transcriptionSeparatorId, text: "" },
+        { kind: "answer", id: answerId, text: "" },
+      ];
+    });
 
     setActiveAnswerId(answerId);
     setIsAnswering(true);
 
-    if (!apiKey) {
-      updateAnswerBlockText(
-        answerId,
-        "Add your OpenRouter API key in settings to generate answers."
-      );
+    function rollbackAnswerBlock() {
+      setBlocks((prev) => {
+        const next = prev.filter(
+          (b) => b.id !== answerId && b.id !== transcriptionSeparatorId
+        );
+        const rolledBackCount = next.filter((b) => b.kind === "answer").length;
+        setAnswerIndex(Math.max(0, rolledBackCount - 1));
+        return next;
+      });
       setIsAnswering(false);
       setActiveAnswerId(null);
-      return;
     }
 
-    if (!transcriptText) {
-      updateAnswerBlockText(
-        answerId,
-        "Start listening first so I have some transcript to answer from."
-      );
-      setIsAnswering(false);
-      setActiveAnswerId(null);
-      return;
-    }
-
-    if (resumeRelevant && !resume) {
-      updateAnswerBlockText(
-        answerId,
-        "Upload your resume in settings so I can answer resume-related questions from your actual background."
-      );
-      setIsAnswering(false);
-      setActiveAnswerId(null);
-      return;
-    }
+    if (!apiKey) { rollbackAnswerBlock(); return; }
+    if (!transcriptText) { rollbackAnswerBlock(); return; }
+    if (resumeRelevant && !resume) { rollbackAnswerBlock(); return; }
 
     const requestId = answerRunId.current;
     const controller = new AbortController();
@@ -710,68 +671,103 @@ export default function App() {
       messages,
       signal: controller.signal,
       onTextChunk: (chunk) => {
-        if (answerRunId.current !== requestId) {
-          return;
-        }
-
+        if (answerRunId.current !== requestId) return;
         answerRawText.current += chunk;
         updateAnswerBlockText(answerId, answerRawText.current);
       },
     })
       .then(({ text }) => {
-        if (answerRunId.current !== requestId) {
-          return;
-        }
+        if (answerRunId.current !== requestId) return;
 
         const finalAnswer = text || answerRawText.current;
-        updateAnswerBlockText(
-          answerId,
-          finalAnswer || "OpenRouter returned an empty response."
-        );
+        updateAnswerBlockText(answerId, finalAnswer || "OpenRouter returned an empty response.");
 
         if (finalAnswer) {
           finishAnswerSession(latestTranscriptText, finalAnswer);
+          autoAnswerRetryCount.current = 0; // reset retry count on success
         }
       })
       .catch((error: unknown) => {
-        if (answerRunId.current !== requestId) {
-          return;
-        }
+        if (answerRunId.current !== requestId) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
 
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
+        // Remove the failed answer block + its separator
+        setBlocks((prev) => {
+          const next = prev.filter(
+            (b) => b.id !== answerId && b.id !== transcriptionSeparatorId
+          );
+          const rolledBackCount = next.filter((b) => b.kind === "answer").length;
+          setAnswerIndex(Math.max(0, rolledBackCount - 1));
+          return next;
+        });
 
-        const message = error instanceof Error ? error.message : String(error);
-        updateAnswerBlockText(answerId, `OpenRouter request failed: ${message}`);
+        // Auto-mode: retry immediately (500ms) up to MAX_AUTO_ANSWER_RETRIES times
+        if (autoAnswerRef.current && autoAnswerRetryCount.current < MAX_AUTO_ANSWER_RETRIES) {
+          autoAnswerRetryCount.current += 1;
+          autoAnswerTimer.current = setTimeout(() => {
+            autoAnswerTimer.current = null;
+            shortcutHandlersRef.current.answer();
+          }, 500);
+        }
       })
       .finally(() => {
-        if (answerRunId.current !== requestId) {
-          return;
-        }
+        if (answerRunId.current !== requestId) return;
 
         answerAbortController.current = null;
         answerRawText.current = "";
         setIsAnswering(false);
         setActiveAnswerId(null);
+
+        // If auto-answer is on and there's new transcript waiting, arm the 2s silence timer
+        if (autoAnswerRef.current && committedTranscriptText.current.trim()) {
+          if (autoAnswerTimer.current) clearTimeout(autoAnswerTimer.current);
+          autoAnswerTimer.current = setTimeout(() => {
+            autoAnswerTimer.current = null;
+            shortcutHandlersRef.current.answer();
+          }, 2000);
+        }
       });
   }
 
   function handleClear() {
+    autoAnswerRetryCount.current = 0;
     stopActiveAnswerStream();
+    if (autoAnswerTimer.current) {
+      clearTimeout(autoAnswerTimer.current);
+      autoAnswerTimer.current = null;
+    }
     answerMemory.current = [];
-    void stopAudioTranscription();
-    currentAudioSessionId.current = null;
     liveTranscriptBlockId.current = null;
     committedTranscriptText.current = "";
     transcriptResetBoundary.current = "";
     transcriptBoundaryEnd.current = null;
     latestTranscriptEnd.current = null;
     setBlocks([]);
-    setIsTranscribing(false);
     setIsAnswering(false);
     setActiveTranscriptionId(null);
     setActiveAnswerId(null);
+    setAnswerIndex(0);
+  }
+
+  function handlePrevAnswer() {
+    setAnswerIndex((prev) => Math.max(0, prev - 1));
+  }
+
+  function handleUpdateClick() {
+    setView("update");
+  }
+
+  function handleStartDownload() {
+    (window as any).appUpdater?.startDownload();
+  }
+
+  function handleInstall() {
+    (window as any).appUpdater?.runInstaller();
+  }
+
+  function handleNextAnswer() {
+    const answerCount = blocks.filter((b) => b.kind === "answer").length;
+    setAnswerIndex((prev) => Math.min(answerCount - 1, prev + 1));
   }
 
   shortcutHandlersRef.current = {
@@ -788,26 +784,12 @@ export default function App() {
         ? "justify-end px-0"
         : "justify-center px-4";
 
-  function handleSettingChange<K extends keyof SettingsState>(
-    key: K,
-    value: SettingsState[K]
-  ) {
+  function handleSettingChange<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
     if (typeof value === "string") {
-      if (key === "deepgramApiKey") {
-        window.localStorage.setItem("dosa.deepgramApiKey", value);
-      }
-
-      if (key === "openrouterApiKey") {
-        window.localStorage.setItem("dosa.openrouterApiKey", value);
-      }
-
-      if (key === "openrouterModel") {
-        window.localStorage.setItem("dosa.openrouterModel", value);
-      }
-
-      if (key === "geminiApiKey") {
-        window.localStorage.setItem("dosa.geminiApiKey", value);
-      }
+      if (key === "deepgramApiKey") window.localStorage.setItem("dosa.deepgramApiKey", value);
+      if (key === "openrouterApiKey") window.localStorage.setItem("dosa.openrouterApiKey", value);
+      if (key === "openrouterModel") window.localStorage.setItem("dosa.openrouterModel", value);
+      if (key === "geminiApiKey") window.localStorage.setItem("dosa.geminiApiKey", value);
     }
 
     if (key === "appWidth" && typeof value === "number") {
@@ -822,26 +804,53 @@ export default function App() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
 
+  const answerCount = blocks.filter((b) => b.kind === "answer").length;
+
   return (
     <div
       ref={rootRef}
       className={`bg-transparent flex items-start pt-12 overflow-hidden ${shellAlignmentClass}`}
     >
       <div
-        ref={shellRef}
-        className="w-full bg-background border border-border flex flex-col overflow-hidden"
-        style={{
-          width: `min(${settings.appWidth}px, calc(100vw - 32px))`,
-          opacity: settings.transparency / 100,
-          maxHeight: `${maxShellHeight}px`,
-        }}
-      >
+  ref={shellRef}
+  className="w-full border border-border flex flex-col overflow-hidden"
+  style={{
+    width: `min(${settings.appWidth}px, calc(100vw - 32px))`,
+    backgroundColor: `color-mix(in srgb, var(--background) ${settings.transparency}%, transparent)`,
+    maxHeight: `${maxShellHeight}px`,
+  }}
+>
         <Topbar
           view={view}
           resumeUploaded={settings.resumeUploaded}
           onSettings={() => setView("settings")}
           onBack={() => setView("main")}
           onClose={closeAppWindow}
+          isTranscribing={isTranscribing}
+          isAnswering={isAnswering}
+          onListen={handleListen}
+          onAnswer={handleAnswer}
+          onClear={handleClear}
+          onAnalyze={handleAnalyze}
+          answerCount={answerCount}
+          answerIndex={answerIndex}
+          onPrevAnswer={handlePrevAnswer}
+          onNextAnswer={handleNextAnswer}
+          autoAnswer={autoAnswer}
+          onToggleAutoAnswer={() => {
+            setAutoAnswer((prev) => {
+              const next = !prev;
+              autoAnswerRef.current = next;
+              if (!next && autoAnswerTimer.current) {
+                clearTimeout(autoAnswerTimer.current);
+                autoAnswerTimer.current = null;
+              }
+              return next;
+            });
+          }}
+          updateAvailable={updateAvailable}
+          updateVersion={updateVersion}
+          onUpdateClick={handleUpdateClick}
         />
 
         {view === "main" ? (
@@ -849,22 +858,26 @@ export default function App() {
             blocks={blocks}
             isTranscribing={isTranscribing}
             isAnswering={isAnswering}
-          activeTranscriptionId={activeTranscriptionId}
-          activeAnswerId={activeAnswerId}
-          scrollToBottomSignal={scrollToBottomSignal}
-          onListen={handleListen}
-          onAnswer={handleAnswer}
-          onClear={handleClear}
-            onAnalyze={handleAnalyze}
+            activeTranscriptionId={activeTranscriptionId}
+            activeAnswerId={activeAnswerId}
+            scrollToBottomSignal={scrollToBottomSignal}
+            answerIndex={answerIndex}
+          />
+        ) : view === "settings" ? (
+          <SettingsView
+            settings={settings}
+            onChange={handleSettingChange}
+            onResumeUpload={handleResumeUpload}
+            onResumeDelete={handleResumeDelete}
           />
         ) : (
-        <SettingsView
-          settings={settings}
-          onChange={handleSettingChange}
-          onResumeUpload={handleResumeUpload}
-          onResumeDelete={handleResumeDelete}
-        />
-      )}
+          <UpdateView
+            updateInfo={updateInfo}
+            progress={downloadProgress}
+            onStartDownload={handleStartDownload}
+            onInstall={handleInstall}
+          />
+        )}
       </div>
     </div>
   );

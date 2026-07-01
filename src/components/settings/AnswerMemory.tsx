@@ -14,7 +14,7 @@ export function AnswerMemory({ value, onChange }: Props) {
       </p>
       <div className="flex items-center gap-2">
         <button
-          onClick={() => onChange(Math.max(1, value - 1))}
+          onClick={() => onChange(Math.max(0, value - 1))}
           className="w-6 h-6 flex items-center justify-center bg-secondary text-foreground hover:bg-accent transition-colors text-sm leading-none select-none"
         >
           −

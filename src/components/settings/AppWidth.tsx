@@ -3,7 +3,7 @@ interface Props {
   onChange: (v: number) => void;
 }
 
-const MIN_WIDTH = 500;
+const MIN_WIDTH = 600;
 const MAX_WIDTH = 1000;
 
 export function AppWidth({ value, onChange }: Props) {

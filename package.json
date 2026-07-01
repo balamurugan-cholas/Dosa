@@ -1,6 +1,23 @@
 {
   "name": "dosa",
-  "description": "Dosa desktop app",
+  "description": "Dosa is a real-time interview assistant that listens to your interview and generates natural, resume-grounded answers as questions come in.",
+  "author": {
+    "name": "Balamurugan",
+    "email": "balamuruganofficial3@gmail.com",
+    "url": "https://balamurugan-cholas.github.io/dosa-site/"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/balamurugan-cholas/Dosa.git"
+  },
+  "homepage": "https://balamurugan-cholas.github.io/dosa-site/",
+  "keywords": [
+    "electron",
+    "ai",
+    "interview",
+    "desktop"
+  ],
   "private": true,
   "version": "0.0.1",
   "type": "module",
@@ -82,11 +99,11 @@
     "concurrently": "^10.0.3",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
-    "wait-on": "^9.0.10",
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "wait-on": "^9.0.10"
   },
   "peerDependenciesMeta": {
     "react": {

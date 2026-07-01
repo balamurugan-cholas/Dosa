@@ -68,7 +68,7 @@ export function AboutSection() {
               </span>
             </div>
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border/60">
-              v1.0.0
+              v0.0.2
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-2 leading-relaxed text-left w-full">

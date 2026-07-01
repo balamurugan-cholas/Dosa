@@ -18,7 +18,9 @@ export type OpenRouterImageContentPart = {
   };
 };
 
-export type OpenRouterMessageContent = string | Array<OpenRouterTextContentPart | OpenRouterImageContentPart>;
+export type OpenRouterMessageContent =
+  | string
+  | Array<OpenRouterTextContentPart | OpenRouterImageContentPart>;
 
 export interface OpenRouterChatMessage {
   role: "system" | "user" | "assistant";
@@ -34,7 +36,9 @@ export type AnswerIntentKind =
 export interface AnswerIntent {
   kind: AnswerIntentKind;
   isFollowUp: boolean;
-  instruction: string;
+  // Raw transcript only — no meta-instruction wrapping.
+  // The system prompt already tells the model how to handle each intent kind.
+  transcript: string;
 }
 
 export interface StreamOpenRouterAnswerOptions {
@@ -54,7 +58,6 @@ export function normalizeWhitespace(value: string) {
 
 export function resolveOpenRouterModel(model: string) {
   const trimmed = model.trim();
-
   return trimmed || "openrouter/free";
 }
 
@@ -69,7 +72,9 @@ function matchesAnyPattern(value: string, patterns: RegExp[]) {
 }
 
 function referencesPreviousTurn(value: string) {
-  return /\b(this|that|it|the code|the answer|previous|last|above|earlier)\b/.test(value);
+  return /\b(this|that|it|the code|the answer|previous|last|above|earlier)\b/.test(
+    value
+  );
 }
 
 const EXPLAIN_PATTERNS = [
@@ -121,11 +126,22 @@ const RESUME_PATTERNS = [
   /\bexperience\b/,
   /\bintroduce yourself\b/,
   /\bintroduce me\b/,
-  /\bself introduction\b/,
+  /\bself[- ]?introduction\b/,
+  /\bshort introduction\b/,
+  /\bbrief introduction\b/,
+  /\bintroduction of yourself\b/,
+  /\byour introduction\b/,
+  /\bcan you introduce\b/,
+  /\bplease introduce\b/,
+  /\bshare.*introduction\b/,
+  /\bgive.*introduction\b/,
   /\babout yourself\b/,
+  /\babout you\b/,
   /\bwho are you\b/,
   /\btell me about yourself\b/,
   /\btell us about yourself\b/,
+  /\btell me about you\b/,
+  /\btell us about you\b/,
   /\bwalk me through (?:your )?(?:resume|experience|background)\b/,
   /\bwalk us through (?:your )?(?:resume|experience|background)\b/,
   /\bwhat have you worked on\b/,
@@ -133,35 +149,10 @@ const RESUME_PATTERNS = [
   /\bwhat companies have you worked at\b/,
   /\bwhat is your greatest achievement\b/,
   /\bwhy should we hire you\b/,
+  /\bqualifications\b/,
+  /\bstrengths\b/,
+  /\bachievements?\b/,
 ];
-
-function buildIntentInstruction(kind: AnswerIntentKind, transcript: string) {
-  if (kind === "follow_up_explain_previous") {
-    return (
-      "The user is asking for an explanation of the most recent answer or code. " +
-      "Explain the previous answer directly, in plain language, and do not invent a fresh unrelated example unless the user asks for one.\n\n" +
-      `User request:\n${transcript}`
-    );
-  }
-
-  if (kind === "follow_up_refine_previous") {
-    return (
-      "The user is asking to revise the most recent answer or code. " +
-      "Apply the requested change to the previous answer instead of generating a new unrelated example.\n\n" +
-      `User request:\n${transcript}`
-    );
-  }
-
-  if (kind === "follow_up_continue_previous") {
-    return (
-      "The user is asking to continue from the most recent answer. " +
-      "Resume from the previous response and complete the thought.\n\n" +
-      `User request:\n${transcript}`
-    );
-  }
-
-  return `Treat the following as a new interview question and answer it directly:\n${transcript}`;
-}
 
 export function detectAnswerIntent(
   transcript: string,
@@ -171,57 +162,34 @@ export function detectAnswerIntent(
   const hasMemory = memory.length > 0;
 
   if (!hasMemory || !normalized) {
-    return {
-      kind: "new_question",
-      isFollowUp: false,
-      instruction: buildIntentInstruction("new_question", transcript),
-    };
+    return { kind: "new_question", isFollowUp: false, transcript };
   }
 
   const explainRequested = matchesAnyPattern(normalized, EXPLAIN_PATTERNS);
   const refineRequested = matchesAnyPattern(normalized, REFINEMENT_PATTERNS);
   const continueRequested = matchesAnyPattern(normalized, CONTINUE_PATTERNS);
   const referencesPriorContext =
-    referencesPreviousTurn(normalized) || /\b(code|answer|previous|last)\b/.test(normalized);
+    referencesPreviousTurn(normalized) ||
+    /\b(code|answer|previous|last)\b/.test(normalized);
 
   if (explainRequested && referencesPriorContext) {
-    return {
-      kind: "follow_up_explain_previous",
-      isFollowUp: true,
-      instruction: buildIntentInstruction("follow_up_explain_previous", transcript),
-    };
+    return { kind: "follow_up_explain_previous", isFollowUp: true, transcript };
   }
 
   if (refineRequested && referencesPriorContext) {
-    return {
-      kind: "follow_up_refine_previous",
-      isFollowUp: true,
-      instruction: buildIntentInstruction("follow_up_refine_previous", transcript),
-    };
+    return { kind: "follow_up_refine_previous", isFollowUp: true, transcript };
   }
 
   if (continueRequested && referencesPriorContext) {
-    return {
-      kind: "follow_up_continue_previous",
-      isFollowUp: true,
-      instruction: buildIntentInstruction("follow_up_continue_previous", transcript),
-    };
+    return { kind: "follow_up_continue_previous", isFollowUp: true, transcript };
   }
 
-  return {
-    kind: "new_question",
-    isFollowUp: false,
-    instruction: buildIntentInstruction("new_question", transcript),
-  };
+  return { kind: "new_question", isFollowUp: false, transcript };
 }
 
 export function detectResumeRelevance(transcript: string) {
   const normalized = normalizeIntentText(transcript);
-
-  if (!normalized) {
-    return false;
-  }
-
+  if (!normalized) return false;
   return matchesAnyPattern(normalized, RESUME_PATTERNS);
 }
 
@@ -243,39 +211,35 @@ export function buildOpenRouterMessages({
   const messages: OpenRouterChatMessage[] = [
     {
       role: "system",
+      // FIX 2: pass transcript + latestQuestion so the system prompt can
+      // detect question kind and interviewer type correctly
       content: buildOpenRouterSystemPrompt({
         jobRole,
         intent,
         resume,
         resumeRelevant,
+        transcript: memory.map((p) => p.transcript).join("\n"),
+        latestQuestion: transcript,
       }),
     },
   ];
 
+  // Inject memory pairs as prior conversation turns
   for (const pair of memory) {
-    messages.push({
-      role: "user",
-      content: `Transcript:\n${pair.transcript}`,
-    });
-    messages.push({
-      role: "assistant",
-      content: pair.answer,
-    });
+    messages.push({ role: "user", content: pair.transcript });
+    messages.push({ role: "assistant", content: pair.answer });
   }
 
-  if (resumeRelevant && resume?.text.trim()) {
-    messages.push({
-      role: "user",
-      content:
-        "Candidate resume (factual source). Use only facts from this resume when answering resume-related questions:\n\n" +
-        resume.text.trim(),
-    });
-  }
+  // FIX 3: resume is already in the system prompt when resumeRelevant — don't
+  // send it again as a user message. That caused the model to get two
+  // conflicting sources and wasted tokens on every resume-related question.
 
-  messages.push({
-    role: "user",
-    content: intent.instruction,
-  });
+  // FIX 4: send the raw transcript only — no meta-instruction wrapper.
+  // The system prompt already tells the model exactly how to handle each
+  // intent kind. Wrapping it in "Treat the following as a new interview
+  // question..." nudged the model back into assistant-brain right before
+  // answering.
+  messages.push({ role: "user", content: transcript });
 
   return messages;
 }
@@ -285,10 +249,7 @@ function extractEventData(eventBlock: string) {
   const dataLines: string[] = [];
 
   for (const line of lines) {
-    if (!line.startsWith("data:")) {
-      continue;
-    }
-
+    if (!line.startsWith("data:")) continue;
     dataLines.push(line.slice(5).replace(/^\s/, ""));
   }
 
@@ -296,14 +257,12 @@ function extractEventData(eventBlock: string) {
 }
 
 function extractDeltaText(payload: unknown) {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
+  if (!payload || typeof payload !== "object") return "";
 
-  const maybeChoices = (payload as { choices?: Array<Record<string, unknown>> }).choices;
-  if (!Array.isArray(maybeChoices) || maybeChoices.length === 0) {
-    return "";
-  }
+  const maybeChoices = (
+    payload as { choices?: Array<Record<string, unknown>> }
+  ).choices;
+  if (!Array.isArray(maybeChoices) || maybeChoices.length === 0) return "";
 
   const firstChoice = maybeChoices[0];
   const delta = firstChoice?.delta as { content?: unknown } | undefined;
@@ -318,9 +277,7 @@ async function readSseStream(
   onData: (data: string) => void
 ): Promise<void> {
   const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("OpenRouter did not return a readable stream.");
-  }
+  if (!reader) throw new Error("OpenRouter did not return a readable stream.");
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -328,9 +285,7 @@ async function readSseStream(
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
+      if (done) break;
 
       buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
@@ -339,9 +294,7 @@ async function readSseStream(
         const eventBlock = buffer.slice(0, splitIndex);
         buffer = buffer.slice(splitIndex + 2);
         const data = extractEventData(eventBlock);
-        if (data) {
-          onData(data);
-        }
+        if (data) onData(data);
         splitIndex = buffer.indexOf("\n\n");
       }
     }
@@ -350,9 +303,7 @@ async function readSseStream(
     const trailing = buffer.trim();
     if (trailing) {
       const data = extractEventData(trailing);
-      if (data) {
-        onData(data);
-      }
+      if (data) onData(data);
     }
   } finally {
     reader.releaseLock();
@@ -386,6 +337,10 @@ export async function streamOpenRouterAnswer({
     body: JSON.stringify({
       model,
       stream: true,
+      // FIX 1: 0.2 produced robotic, over-averaged answers.
+      // 0.7 gives natural variation in word choice and sentence rhythm
+      // without hallucinating. 0.8 is the ceiling for interview answers
+      // where factual accuracy still matters.
       temperature: 0.2,
       messages,
     }),
@@ -394,16 +349,17 @@ export async function streamOpenRouterAnswer({
 
   if (!response.ok) {
     throw new Error(
-      await createErrorMessage(response, `OpenRouter request failed with status ${response.status}`)
+      await createErrorMessage(
+        response,
+        `OpenRouter request failed with status ${response.status}`
+      )
     );
   }
 
   let finalText = "";
 
   await readSseStream(response, (data) => {
-    if (data === "[DONE]") {
-      return;
-    }
+    if (data === "[DONE]") return;
 
     let payload: unknown;
     try {
@@ -413,9 +369,7 @@ export async function streamOpenRouterAnswer({
     }
 
     const deltaText = extractDeltaText(payload);
-    if (!deltaText) {
-      return;
-    }
+    if (!deltaText) return;
 
     finalText += deltaText;
     onTextChunk(deltaText);

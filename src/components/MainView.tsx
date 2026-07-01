@@ -1,5 +1,4 @@
 import { ContentArea } from "./ContentArea";
-import { BottomBar } from "./BottomBar";
 import { ContentBlock } from "../lib/types";
 
 interface Props {
@@ -9,10 +8,7 @@ interface Props {
   activeTranscriptionId: number | null;
   activeAnswerId: number | null;
   scrollToBottomSignal: number;
-  onListen: () => void;
-  onAnswer: () => void;
-  onClear: () => void;
-  onAnalyze: () => void;
+  answerIndex: number;
 }
 
 export function MainView({
@@ -22,10 +18,7 @@ export function MainView({
   activeTranscriptionId,
   activeAnswerId,
   scrollToBottomSignal,
-  onListen,
-  onAnswer,
-  onClear,
-  onAnalyze,
+  answerIndex,
 }: Props) {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -36,14 +29,7 @@ export function MainView({
         activeTranscriptionId={activeTranscriptionId}
         activeAnswerId={activeAnswerId}
         scrollToBottomSignal={scrollToBottomSignal}
-      />
-      <BottomBar
-        isTranscribing={isTranscribing}
-        isAnswering={isAnswering}
-        onListen={onListen}
-        onAnswer={onAnswer}
-        onClear={onClear}
-        onAnalyze={onAnalyze}
+        answerIndex={answerIndex}
       />
     </div>
   );

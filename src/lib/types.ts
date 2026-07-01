@@ -14,7 +14,7 @@ export type ContentBlock = TranscriptionBlock | AnswerBlock;
 
 export type Phase = "idle" | "transcribing" | "ready" | "answering";
 
-export type View = "main" | "settings";
+export type View = "main" | "settings" | "update";
 export type WindowSnapPosition = "left" | "center" | "right";
 export type AppShortcutAction = "listen" | "answer" | "analyze" | "scroll-bottom" | "clear";
 
@@ -81,6 +81,7 @@ export type AudioTranscriptionUpdate =
 
 export interface AudioTranscriptionStartOptions {
   apiKey?: string;
+  jobRole?: string;
 }
 
 export interface AudioTranscriptionStartResult {
@@ -109,4 +110,27 @@ export interface ResumeRecord {
   fileType: string | null;
   text: string;
   updatedAt: number;
+}
+
+export type UpdateDownloadStatus =
+  | "idle"
+  | "downloading"
+  | "paused"
+  | "completed"
+  | "error";
+
+export interface UpdateInfo {
+  version: string;
+  url: string;
+  assetName: string | null;
+  assetSize: number | null;
+  body: string | null;
+}
+
+export interface UpdateDownloadProgress {
+  status: UpdateDownloadStatus;
+  version: string;
+  bytesDownloaded: number;
+  totalBytes: number;
+  message: string | null;
 }

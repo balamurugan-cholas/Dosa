@@ -103,8 +103,13 @@ function parseAnswerNodes(text: string): AnswerNode[] {
 function highlightCode(code: string, language: string) {
   const normalizedLanguage = language.trim().toLowerCase();
 
+  // Never syntax-highlight plain text — just escape and return as-is
+  if (!normalizedLanguage || normalizedLanguage === "plaintext" || normalizedLanguage === "text") {
+    return { html: escapeHtml(code), language: "plaintext" };
+  }
+
   try {
-    if (normalizedLanguage && hljs.getLanguage(normalizedLanguage)) {
+    if (hljs.getLanguage(normalizedLanguage)) {
       return {
         html: hljs.highlight(code, {
           language: normalizedLanguage,
@@ -115,14 +120,19 @@ function highlightCode(code: string, language: string) {
     }
 
     const auto = hljs.highlightAuto(code);
+    // If auto-detect falls back to plaintext, don't highlight
+    if (!auto.language || auto.language === "plaintext") {
+      return { html: escapeHtml(code), language: "plaintext" };
+    }
+
     return {
       html: auto.value,
-      language: auto.language || normalizedLanguage || "plaintext",
+      language: auto.language,
     };
   } catch {
     return {
       html: escapeHtml(code),
-      language: normalizedLanguage || "plaintext",
+      language: normalizedLanguage,
     };
   }
 }
@@ -135,7 +145,7 @@ function getCodeLanguage(className?: string) {
 const markdownComponents: Components = {
   p({ children }) {
     return (
-      <p className="text-sm leading-7 text-foreground break-words whitespace-normal">
+      <p className="text-base leading-7 text-foreground break-words whitespace-normal">
         {children}
       </p>
     );
@@ -159,11 +169,11 @@ const markdownComponents: Components = {
     return <ol className="my-1 ml-5 list-decimal space-y-1">{children}</ol>;
   },
   li({ children }) {
-    return <li className="text-sm leading-7 text-foreground break-words">{children}</li>;
+    return <li className="text-base leading-7 text-foreground break-words">{children}</li>;
   },
   blockquote({ children }) {
     return (
-      <blockquote className="my-2 border-l-2 border-border pl-3 text-sm leading-7 text-muted-foreground">
+      <blockquote className="my-2 border-l-2 border-border pl-3 text-base leading-7 text-muted-foreground">
         {children}
       </blockquote>
     );
@@ -212,7 +222,12 @@ const markdownComponents: Components = {
     );
   },
   code({ inline, className, children }: any) {
-    if (inline) {
+    const rawCode = String(children).replace(/\n$/, "");
+    const isMultiline = rawCode.includes("\n");
+    const language = getCodeLanguage(className);
+
+    // Treat as inline if: explicitly inline, or no language specified and single line
+    if (inline || (!isMultiline && !className)) {
       return (
         <code className="rounded border border-border bg-secondary px-1 py-0.5 font-mono text-[0.95em] text-foreground">
           {children}
@@ -220,8 +235,6 @@ const markdownComponents: Components = {
       );
     }
 
-    const language = getCodeLanguage(className);
-    const rawCode = String(children).replace(/\n$/, "");
     const highlighted = highlightCode(rawCode, language);
 
     return (
@@ -349,6 +362,8 @@ interface Props {
   activeTranscriptionId: number | null;
   activeAnswerId: number | null;
   scrollToBottomSignal: number;
+  // Answer navigation
+  answerIndex: number;
 }
 
 export function ContentArea({
@@ -358,69 +373,104 @@ export function ContentArea({
   activeTranscriptionId,
   activeAnswerId,
   scrollToBottomSignal,
+  answerIndex,
 }: Props) {
-  const isEmpty = blocks.length === 0;
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const node = scrollRef.current;
-    if (!node) {
-      return;
-    }
-
-    node.scrollTo({
-      top: node.scrollHeight,
-      behavior: "smooth",
-    });
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [scrollToBottomSignal]);
 
+  // Derive merged transcription text from all transcription blocks
+  const transcriptionText = blocks
+    .filter((b) => b.kind === "transcription" && b.text.trim().length > 0)
+    .map((b) => b.text)
+    .join(" ")
+    .trim();
+
+  // Active transcription block (for live cursor)
+  const liveTranscriptionBlock = blocks.find(
+    (b) => b.kind === "transcription" && b.id === activeTranscriptionId
+  );
+
+  // Auto-scroll transcription line to the right as new text arrives
+  const transcriptLineRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = transcriptLineRef.current;
+    if (!node) return;
+    node.scrollLeft = node.scrollWidth;
+  }, [transcriptionText]);
+
+  // All answer blocks in order
+  const answerBlocks = blocks.filter((b) => b.kind === "answer");
+
+  // The answer to show (clamped to valid range)
+  const clampedIndex = Math.max(0, Math.min(answerIndex, answerBlocks.length - 1));
+  const visibleAnswer = answerBlocks[clampedIndex] ?? null;
+
+  const isEmpty = blocks.length === 0;
+
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+    // Outer: fixed height, no scroll — just a flex column container
+    <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-3 py-3">
       {isEmpty ? (
         <p className="text-xs text-muted-foreground leading-relaxed">
           {isTranscribing ? "Listening..." : "Listening for speech..."}
         </p>
       ) : (
-        <div className="space-y-px">
-          {blocks.map((block, idx) => {
-            if (block.kind === "transcription") {
-              const hasText = block.text.trim().length > 0;
+        <div className="flex flex-col flex-1 min-h-0 gap-3">
 
-              return (
-                <div key={block.id} className={idx > 0 ? "pt-3" : ""}>
-                  {hasText ? (
-                    <p className="text-sm text-foreground leading-[1.65] whitespace-pre-wrap break-words">
-                      {block.text}
-                      {block.id === activeTranscriptionId && isTranscribing && (
-                        <span className="inline-block w-[2px] h-[13px] bg-muted-foreground ml-0.5 align-middle animate-pulse" />
-                      )}
-                    </p>
-                  ) : null}
-                  {block.id === activeTranscriptionId &&
-                    isTranscribing &&
-                    !hasText && (
-                      <p className="text-xs text-muted-foreground">Listening...</p>
-                    )}
-                </div>
-              );
-            }
+          {/* Transcription — pinned, never scrolls vertically */}
+          <div
+            ref={transcriptLineRef}
+            className="shrink-0 overflow-x-auto"
+            style={{ scrollbarWidth: "none" }}
+          >
+            {transcriptionText ? (
+              <p className="text-sm text-foreground leading-[1.65] whitespace-nowrap">
+                {transcriptionText}
+                {liveTranscriptionBlock && isTranscribing && (
+                  <span className="inline-block w-[2px] h-[13px] bg-muted-foreground ml-0.5 align-middle animate-pulse" />
+                )}
+              </p>
+            ) : isTranscribing ? (
+              <p className="text-xs text-muted-foreground">Listening...</p>
+            ) : null}
+          </div>
 
-            return (
-              <div key={block.id}>
-                <div className="flex items-center gap-2.5 py-2.5">
-                  <div className="h-px flex-1 bg-border" />
-                  <span className="text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
-                    Answer
-                  </span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                <MarkdownAnswer
-                  text={block.text}
-                  active={block.id === activeAnswerId && isAnswering}
-                />
+          {/* Answer — takes remaining space and scrolls internally */}
+          {visibleAnswer && (
+            <div ref={scrollRef} className="min-h-0 overflow-y-auto">
+              <div className="flex items-center gap-2.5 py-2.5">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Answer
+                </span>
+                <div className="h-px flex-1 bg-border" />
               </div>
-            );
-          })}
+              <MarkdownAnswer
+                text={visibleAnswer.text}
+                active={visibleAnswer.id === activeAnswerId && isAnswering}
+              />
+            </div>
+          )}
+
+          {/* Thinking state */}
+          {isAnswering && answerBlocks.length === 0 && (
+            <div className="shrink-0">
+              <div className="flex items-center gap-2.5 py-2.5">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Answer
+                </span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <p className="text-xs text-muted-foreground">Thinking...</p>
+            </div>
+          )}
+
         </div>
       )}
     </div>
