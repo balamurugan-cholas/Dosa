@@ -222,7 +222,9 @@ const markdownComponents: Components = {
     );
   },
   code({ inline, className, children }: any) {
+    if (children == null || children === "") return null;
     const rawCode = String(children).replace(/\n$/, "");
+    if (rawCode.trim().toLowerCase() === "undefined") return null;
     const isMultiline = rawCode.includes("\n");
     const language = getCodeLanguage(className);
 

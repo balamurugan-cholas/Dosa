@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Topbar } from "../components/Topbar";
 import { MainView } from "../components/MainView";
+import { CaptureStatusModal } from "../components/CaptureStatusModal";
 import { SettingsView } from "../components/SettingsView";
 import { UpdateView } from "../components/UpdateView";
 import type {
@@ -30,6 +31,11 @@ import {
   streamOpenRouterAnswer,
   type OpenRouterMemoryPair,
 } from "../lib/openrouter";
+import {
+  detectQuestionKind,
+  transcriptHasPriorCode,
+  getMaxTokensForKind,
+} from "../lib/openrouter-system-prompt";
 import { streamGeminiAnalyzeScreenAnswer } from "../lib/analyze-screen";
 import { deleteStoredResume, loadStoredResume, uploadStoredResume } from "../lib/resume";
 import {
@@ -80,6 +86,7 @@ export default function App() {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<UpdateDownloadProgress | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
   const autoAnswerRef = useRef(false);
   const autoAnswerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoAnswerRetryCount = useRef(0);
@@ -318,6 +325,7 @@ export default function App() {
           transcriptBoundaryEnd.current = null;
           latestTranscriptEnd.current = null;
           currentAudioSessionId.current = null;
+          setCaptureError(event.error || event.message || "Listening failed for an unknown reason.");
         }
 
         return;
@@ -332,6 +340,7 @@ export default function App() {
         transcriptBoundaryEnd.current = null;
         latestTranscriptEnd.current = null;
         currentAudioSessionId.current = null;
+        setCaptureError(event.error || event.message || "Listening failed for an unknown reason.");
         return;
       }
 
@@ -358,6 +367,7 @@ export default function App() {
     };
 
     const handleMouseMove = (event: MouseEvent) => {
+      if (captureError) { updateClickThrough(false); return; }
       const shell = shellRef.current;
       if (!shell) { updateClickThrough(true); return; }
       const target = document.elementFromPoint(event.clientX, event.clientY);
@@ -376,7 +386,7 @@ export default function App() {
       window.removeEventListener("blur", handleBlur);
       updateClickThrough(false);
     };
-  }, []);
+  }, [captureError]);
 
   useEffect(() => {
     const unsubscribe = subscribeToWindowSnapPosition((event) => {
@@ -496,6 +506,7 @@ export default function App() {
     });
     if (!started) {
       setIsTranscribing(false);
+      setCaptureError("Couldn't reach the audio capture bridge. Try restarting the app.");
       return;
     }
 
@@ -510,6 +521,7 @@ export default function App() {
       transcriptBoundaryEnd.current = null;
       latestTranscriptEnd.current = null;
       currentAudioSessionId.current = null;
+      setCaptureError(started.error || started.message || "Listening failed for an unknown reason.");
     }
   }
 
@@ -610,7 +622,8 @@ export default function App() {
     const memoryLimit = Math.max(0, settings.answerMemory);
     const memory = memoryLimit > 0 ? answerMemory.current.slice(-memoryLimit) : [];
     const intent = detectAnswerIntent(latestTranscriptText, memory);
-    const resumeRelevant = detectResumeRelevance(latestTranscriptText);
+    const questionKind = detectQuestionKind(latestTranscriptText);
+    const resumeRelevant = detectResumeRelevance(latestTranscriptText) || questionKind === "personal";
     const resume = resumeRelevant ? resumeRecord.current : null;
     const transcriptionSeparatorId = nextId();
     const answerId = nextId();
@@ -665,10 +678,18 @@ export default function App() {
       resumeRelevant,
     });
 
+    const fullTranscriptForCodeCheck = memory.map((p) => p.transcript).join("\n");
+    const isCodingContinuation =
+      questionKind === "coding" &&
+      transcriptHasPriorCode(fullTranscriptForCodeCheck) &&
+      intent.isFollowUp;
+    const maxTokens = getMaxTokensForKind(questionKind, isCodingContinuation);
+
     void streamOpenRouterAnswer({
       apiKey,
       model: resolvedModel,
       messages,
+      maxTokens,
       signal: controller.signal,
       onTextChunk: (chunk) => {
         if (answerRunId.current !== requestId) return;
@@ -680,12 +701,31 @@ export default function App() {
         if (answerRunId.current !== requestId) return;
 
         const finalAnswer = text || answerRawText.current;
-        updateAnswerBlockText(answerId, finalAnswer || "OpenRouter returned an empty response.");
 
-        if (finalAnswer) {
-          finishAnswerSession(latestTranscriptText, finalAnswer);
-          autoAnswerRetryCount.current = 0; // reset retry count on success
+        if (!finalAnswer) {
+          // Silently drop — same treatment as a failed request.
+          setBlocks((prev) => {
+            const next = prev.filter(
+              (b) => b.id !== answerId && b.id !== transcriptionSeparatorId
+            );
+            const rolledBackCount = next.filter((b) => b.kind === "answer").length;
+            setAnswerIndex(Math.max(0, rolledBackCount - 1));
+            return next;
+          });
+
+          if (autoAnswerRef.current && autoAnswerRetryCount.current < MAX_AUTO_ANSWER_RETRIES) {
+            autoAnswerRetryCount.current += 1;
+            autoAnswerTimer.current = setTimeout(() => {
+              autoAnswerTimer.current = null;
+              shortcutHandlersRef.current.answer();
+            }, 500);
+          }
+          return;
         }
+
+        updateAnswerBlockText(answerId, finalAnswer);
+        finishAnswerSession(latestTranscriptText, finalAnswer);
+        autoAnswerRetryCount.current = 0; // reset retry count on success
       })
       .catch((error: unknown) => {
         if (answerRunId.current !== requestId) return;
@@ -879,6 +919,16 @@ export default function App() {
           />
         )}
       </div>
+
+      <CaptureStatusModal
+        open={!!captureError}
+        message={captureError ?? ""}
+        onRetry={() => {
+          setCaptureError(null);
+          void handleListen();
+        }}
+        onClose={() => setCaptureError(null)}
+      />
     </div>
   );
 }

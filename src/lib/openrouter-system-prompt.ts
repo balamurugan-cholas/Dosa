@@ -3,7 +3,7 @@ import type { ResumeRecord } from "./types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type InterviewerType = "technical" | "hr" | "hiring_manager" | "unknown";
-type QuestionKind =
+export type QuestionKind =
   | "personal"
   | "behavioral"
   | "coding"
@@ -160,74 +160,122 @@ function isResumeDrivenQuestion(question: string): boolean {
 // full transcript it can already see — which is far more reliable than
 // any string match, and works identically for Django, React, SQL, Go,
 // or anything else.
-function transcriptHasPriorCode(transcript: string): boolean {
+export function transcriptHasPriorCode(transcript: string): boolean {
   return /```|def |function |class |SELECT |const |import |public |void |#include/i.test(transcript);
 }
 
 // ─── Question kind detection (ordered carefully to avoid false matches) ───────
-function detectQuestionKind(question: string): QuestionKind {
+export function detectQuestionKind(question: string): QuestionKind {
   const q = question.toLowerCase();
 
-  const personalTriggers = [
-    "tell me about yourself", "walk me through your resume", "walk me through your cv",
-    "walk us through your resume", "walk us through your cv", "talk me through your background",
-    "tell me about your background", "tell me about your career", "describe your career",
-    "your professional journey", "your career so far", "your work history",
-    "what's your story", "give me an overview of your experience",
-    "walk me through your background", "walk me through your career",
-    "tell me about your experience", "summarize your background",
+  const personalPatterns = [
+    /\btell (me|us)\b.*\byourself\b/,
+    /\bwalk (me |us )?through\b.*\b(your )?(resume|cv|background|career)\b/,
+    /\btalk (me |us )?through\b.*\bbackground\b/,
+    /\btell (me|us)\b.*\b(about )?(your )?(background|career|journey|story|experience)\b/,
+    /\bdescribe (your )?career\b/,
+    /\bcareer so far\b/,
+    /\bwork history\b/,
+    /\bgive (me|us)\b.*\boverview\b.*\bexperience\b/,
+    /\bsummarize (your )?background\b/,
   ];
-  if (personalTriggers.some((t) => q.includes(t))) return "personal";
+  if (personalPatterns.some((p) => p.test(q))) return "personal";
 
-  const behavioralTriggers = [
-    "tell me about a time", "give me an example of", "describe a situation",
-    "have you ever had to", "walk me through a time", "can you share an experience",
-    "talk about a time", "a time when you", "share a time", "recall a time",
-    "when have you had to", "have you ever dealt with",
+  const behavioralPatterns = [
+    /\btell (me|us)\b.*\ba time\b/,
+    /\bgive (me|us)\b.*\ban example\b/,
+    /\bdescribe a situation\b/,
+    /\bhave you ever\b.*\b(had to|dealt with|faced)\b/,
+    /\bwalk (me |us )?through\b.*\ba time\b/,
+    /\b(can you )?share\b.*\b(an )?experience\b/,
+    /\btalk about a time\b/,
+    /\ba time (when|where) you\b/,
+    /\brecall a time\b/,
   ];
-  if (behavioralTriggers.some((t) => q.includes(t))) return "behavioral";
+  if (behavioralPatterns.some((p) => p.test(q))) return "behavioral";
 
-  const weaknessTriggers = [
-    "weakness", "area for improvement", "what would you do differently",
-    "biggest mistake", "time you failed", "fell short", "didn't go well",
-    "what are you working on improving", "constructive criticism",
+  const weaknessPatterns = [
+    /\bweakness(es)?\b/,
+    /\barea(s)? (for|of) improvement\b/,
+    /\bwhat would you do differently\b/,
+    /\bbiggest mistake\b/,
+    /\b(a )?time you failed\b/,
+    /\bfell short\b/,
+    /\bdidn'?t go well\b/,
+    /\bworking on improving\b/,
+    /\bconstructive criticism\b/,
   ];
-  if (weaknessTriggers.some((t) => q.includes(t))) return "weakness";
+  if (weaknessPatterns.some((p) => p.test(q))) return "weakness";
 
-  const motivationTriggers = [
-    "why this company", "why us", "why this role", "why do you want to work",
-    "what draws you", "what excites you about this", "why are you interested",
-    "why are you looking", "why leave", "why are you leaving",
+  const motivationPatterns = [
+    /\bwhy (this|our) (company|role|team|job)\b/,
+    /\bwhy us\b/,
+    /\bwhy (do you )?want to work\b/,
+    /\bwhat draws you\b/,
+    /\bwhat excites you\b/,
+    /\bwhy are you (interested|looking|leaving)\b/,
+    /\bwhy (would you )?leave\b/,
   ];
-  if (motivationTriggers.some((t) => q.includes(t))) return "motivation";
+  if (motivationPatterns.some((p) => p.test(q))) return "motivation";
 
-  const codingTriggers = [
-    "write a function", "write a class", "write code", "implement a",
-    "pseudocode", "system design", "design a system", "design the architecture",
-    "how would you build", "how would you architect this",
-    "whiteboard", "leetcode", "data structure", "algorithm for",
-    "write a route", "write an endpoint", "write the api", "build a route",
-    "build an endpoint", "create a route", "create an endpoint",
+  const codingTriggerPatterns = [
+    /\bwrite\b.*\b(function|class|code|route|endpoint|api|query|script)\b/,
+    /\b(implement|build|create)\b.*\b(function|class|route|endpoint|api|query|feature)\b/,
+    /\bpseudocode\b/,
+    /\bsystem design\b/,
+    /\bdesign\b.*\b(system|architecture)\b/,
+    /\bhow would you (build|architect|implement|code)\b/,
+    /\bwhiteboard\b/,
+    /\bleetcode\b/,
+    /\bdata structure\b/,
+    /\balgorithm for\b/,
+    /\bcan you (please )?write\b/,
+    /\bshow me the code\b/,
+    /\bcode (this|that|it) up\b/,
+    /\b(full|complete|entire)\b.*\bcode\b/,
+    /\bcode for\b/,
+    /\bgive me the code\b/,
+    /\bcan you code\b/,
+    /\busing (react|python|java|flask|django|node|angular|vue|sql|c\+\+|typescript)\b/,
+    /\bbuild (a|an|the)\b.*\b(page|app|component|website|application|site|form|dashboard)\b/,
   ];
-  const softCodingTriggers = ["how would you implement", "how would you code"];
-  if (
-    codingTriggers.some((t) => q.includes(t)) ||
-    softCodingTriggers.some((t) => q.includes(t))
-  ) return "coding";
+  if (codingTriggerPatterns.some((p) => p.test(q))) return "coding";
 
-  const opinionTriggers = [
-    "how do you approach", "what's your philosophy", "how do you think about",
-    "what do you prefer", "what's your take on", "how do you handle",
-    "what's your opinion", "what do you think about", "how would you prioritize",
+  const codeExplainPatterns = [
+    /\bexplain\b.*\b(line by line|this code|the code|it)\b/,
+    /\bwalk (me |us )?through\b.*\bcode\b/,
+    /\bwhat does this code do\b/,
+    /\bbreak down\b.*\bcode\b/,
   ];
-  if (opinionTriggers.some((t) => q.includes(t))) return "opinion";
+  if (codeExplainPatterns.some((p) => p.test(q))) return "coding";
 
-  const conceptTriggers = [
-    "what is ", "what are ", "define ", "explain ", "how does ",
-    "what does ", "difference between", "compare ", "what's the difference",
-    "what's a ", "can you explain",
+  const opinionPatterns = [
+    /\bhow do you approach\b/,
+    /\bwhat'?s your philosophy\b/,
+    /\bhow do you think about\b/,
+    /\bwhat do you prefer\b/,
+    /\bwhat'?s your take\b/,
+    /\bhow do you handle\b/,
+    /\bwhat'?s your opinion\b/,
+    /\bwhat do you think about\b/,
+    /\bhow would you prioritize\b/,
   ];
-  if (conceptTriggers.some((t) => q.includes(t))) return "concept";
+  if (opinionPatterns.some((p) => p.test(q))) return "opinion";
+
+  const conceptPatterns = [
+    /\bwhat is\b/,
+    /\bwhat are\b/,
+    /\bdefine\b/,
+    /\bexplain\b/,
+    /\bhow does\b/,
+    /\bwhat does\b/,
+    /\bdifference between\b/,
+    /\bcompare\b/,
+    /\bwhat'?s the difference\b/,
+    /\bwhat'?s a\b/,
+    /\bcan you explain\b/,
+  ];
+  if (conceptPatterns.some((p) => p.test(q))) return "concept";
 
   return "unknown";
 }
@@ -251,6 +299,29 @@ function getLengthReminder(kind: QuestionKind): string {
       return `120–180 words. Honest, real, and forward-looking. Not a humblebrag ("I work too hard"), not a crisis. Something I've genuinely worked on.`;
     default:
       return `Lead with the answer, support it briefly, stop. Probably 80–150 words. No padding.`;
+  }
+}
+
+// ─── Token budget (speed vs. completeness, matched to answer length) ────────
+export function getMaxTokensForKind(kind: QuestionKind, isCodingContinuation: boolean): number {
+  switch (kind) {
+    case "coding":
+      // Continuations (building on earlier code) legitimately need more room.
+      // Explaining a large existing block of code can need just as much room
+      // as writing it, so this budget covers both write and explain requests.
+      return isCodingContinuation ? 4500 : 3000;
+    case "personal":
+    case "behavioral":
+    case "weakness":
+      return 400;
+    case "motivation":
+      return 250;
+    case "opinion":
+      return 250;
+    case "concept":
+      return 180;
+    default:
+      return 300;
   }
 }
 
@@ -280,7 +351,7 @@ function getBehavioralFrame(kind: QuestionKind): string {
 function getCodingFrame(kind: QuestionKind, priorCodeExists: boolean): string {
   if (kind !== "coding") return "";
 
-  const base = `Before I write anything, I make sure I understand what I'm solving. I'll ask about or state my assumptions — input types, edge cases, what "optimal" means here. Then I say how I'm thinking about it: the approach, why I'm taking it, what I'm trading off. Then the code. Then I walk through one real example to show it works. I think out loud the whole time because that's what a real engineer does — and it's what the interviewer is actually evaluating.`;
+  const base = `Before I write anything, I make sure I understand what I'm solving. I'll ask about or state my assumptions — input types, edge cases, what "optimal" means here. Then I say how I'm thinking about it: the approach, why I'm taking it, what I'm trading off. Then the code — just the code that answers what was actually asked, not extra scaffolding like HTML templates or unrelated boilerplate unless specifically requested. Then I walk through one real example to show it works. I think out loud the whole time because that's what a real engineer does — and it's what the interviewer is actually evaluating.`;
 
   if (!priorCodeExists) {
     return `${base}
@@ -300,26 +371,10 @@ This same judgment applies no matter what I'm coding in — a web framework, a s
 }
 
 // ─── Anti-AI texture — natural human speech patterns ─────────────────────────
-const humanSpeechTexture = `Real people don't speak in perfectly structured paragraphs. Sometimes I'll correct myself mid-thought: "we went with Postgres — actually, it started as MySQL but we migrated about a year in." Sometimes I'll flag uncertainty in real time: "I don't remember the exact number but it was somewhere around 40% reduction." Sometimes I'll be direct in a way that sounds almost casual: "Honestly it didn't work. We shipped it, got the data, and killed it three weeks later." These are all fine. They make me sound like a person who lived through something, not someone reciting a prepared answer.`;
+const humanSpeechTexture = `I speak like a real person, not structured paragraphs — I sometimes self-correct mid-thought ("we used Postgres — actually it started as MySQL"), flag uncertainty naturally ("roughly 40%, don't quote me exactly"), and I'm casually direct when something didn't work ("honestly it flopped, we killed it three weeks later").`;
 
 // ─── Banned phrases (structured to be unavoidable) ───────────────────────────
-const bannedPhrases = `These phrases must never appear in my answers. Each one is a signal that an AI is talking, not a person:
-
-Filler openers: "Certainly", "Absolutely", "Of course", "Sure!", "Great question", "That's a fantastic question", "Happy to help"
-
-AI tells mid-answer: "It's worth noting", "It's important to note", "Let me walk you through", "I'd be happy to", "This is a great opportunity to", "I hope that helps", "As I mentioned"
-
-Closing tells: "Let me know if you have questions", "Happy to elaborate", "Feel free to ask", "Hope that answers your question", "In conclusion", "To summarize"
-
-Corporate jargon: "Leverage" (as a verb — say "use"), "Utilize" (say "use"), "Delve into", "Dive deep", "At the end of the day", "Going forward", "Moving forward", "Touch base", "Circle back", "Synergy", "Holistic approach", "Robust solution", "Best practices", "Low-hanging fruit", "Move the needle", "Take it offline"
-
-Vague self-summary filler — the kind of line that could describe literally anyone: "I'm a [role] with a focus on...", "What I bring to the table is...", "I prioritize clarity, efficiency, and user-centric design", "a mix of technical expertise and a hands-on approach". If a sentence I'm about to say could be said by any candidate for any job with zero edits, it's filler — I cut it and replace it with something only I, with my specific background, could say.
-
-No emojis. Ever. Not even one. This is a spoken interview answer, not a chat message — emojis would never come out of someone's mouth.
-
-These rules apply with zero exceptions, including at the very end of an answer — "feel free to ask", a smiley, an exclamation-point sign-off are not softer versions of a banned pattern, they're the same banned pattern. I end on substance, then stop talking.
-
-Sentence structure: I never start three sentences in a row with "I". I vary how I open sentences. The rhythm of my speech is uneven in a natural way — not metronomic.`;
+const bannedPhrases = `Never say: Certainly, Absolutely, Of course, Sure!, Great question, Happy to help, It's worth noting, It's important to note, Let me walk you through, I'd be happy to, I hope that helps, As I mentioned, Let me know if you have questions, Feel free to ask, In conclusion, To summarize, Leverage/Utilize (say "use"), Delve into, Dive deep, At the end of the day, Going forward, Circle back, Synergy, Robust solution, Best practices, Move the needle, "I'm a [role] with a focus on...", "a mix of technical expertise and a hands-on approach". No emojis ever. Don't start 3+ sentences in a row with "I" — vary sentence openings. End on substance, no sign-off.`;
 
 // ─── Intent framing ───────────────────────────────────────────────────────────
 function describeIntent(intent: AnswerIntent): string {
@@ -397,18 +452,12 @@ export function buildOpenRouterSystemPrompt({
   if (behavioralFrame) sections.push(`How I'm telling this story:\n${behavioralFrame}`);
   if (codingFrame) sections.push(`How I'm working through this:\n${codingFrame}`);
 
-  sections.push(`When I don't know something:
-I don't fake it. I don't collapse into apologies. I say I haven't worked with it directly, then I reason toward what I'd expect based on what I do know, and name the specific thing I'd want to verify. "I haven't used X in production — based on how [related thing] works, I'd guess it handles this by... but I'd want to confirm [specific assumption] before committing to that." If it's a genuine blank: "That's not something I've run into. I'd start by [concrete first step]." That pivot is more impressive than a bluffed answer.`);
+  sections.push(`When I don't know something: I say so plainly, then reason toward what I'd expect based on related experience, naming what I'd want to verify. No bluffing, no apologizing.`);
 
-  sections.push(`Format:
-No markdown headers — this is a spoken conversation, not a document.
-Bullets only when I'm listing genuinely distinct items and prose would be harder to follow.
-Multi-part questions: bold each part label like **Part one:** then answer it directly.
-Code only when asked or when it's the clearest way to make a point — interview-sized, not production-sized. After any code block, one or two sentences in my natural voice.
-I stop when the answer is complete. No trailing sentence that invites follow-up. No sign-off. Just done.`);
+  sections.push(`Format: no markdown headers, spoken not written. Bullets only for genuinely distinct lists. Multi-part questions: label each part in bold. Code only when it's the clearest way to answer, interview-sized not production-sized, with 1-2 sentences after. Stop when done — no sign-off, no follow-up invite.`);
 
   if (shouldIncludeResume) {
-    const resumeText = resume!.text.trim().slice(0, 14000);
+    const resumeText = resume!.text.trim().slice(0, 3000);
     sections.push(`What I remember about my career:
 These are my actual jobs, projects, and experiences — the things I'm drawing on when I answer questions about my background. This question is specifically about my history, so my answer is built out of the real names, titles, dates, and projects below — not a generalized summary of what kind of engineer I am. I don't invent roles or skills that aren't here, and I also don't water down what IS here into vague adjectives — if my resume says I built a specific named tool with a specific stack, I say that name and that stack, not "an AI-powered tool." If something I'm asked about isn't in my history, I say so briefly and connect to the closest thing that is. For "tell me about yourself" or similar background questions, I give a natural spoken walk-through built from this actual text — not a recitation of the list, but also not a paraphrase so loose it could describe a different person with the same resume.
 

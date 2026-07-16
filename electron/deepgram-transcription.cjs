@@ -64,9 +64,11 @@ function createDeepgramUrl(options = {}) {
     no_delay: "true",
   });
 
-  const keyterms = getKeytermsForRole(options.jobRole);
-  for (const term of keyterms) {
-    params.append("keyterm", term);
+  if (!options.skipKeyterms) {
+    const keyterms = getKeytermsForRole(options.jobRole);
+    for (const term of keyterms) {
+      params.append("keyterm", term);
+    }
   }
 
   return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
@@ -152,7 +154,7 @@ class AudioTranscriptionManager extends EventEmitter {
     };
     this.emit("update", { type: "status", ...this.state });
 
-    const socket = new WebSocket(createDeepgramUrl({ jobRole: options.jobRole }), {
+    const socket = new WebSocket(createDeepgramUrl({ jobRole: options.jobRole, skipKeyterms: options.skipKeyterms }), {
       headers: {
         Authorization: `Token ${apiKey}`,
       },
@@ -190,6 +192,32 @@ class AudioTranscriptionManager extends EventEmitter {
       }
 
       this.#setError(error?.message || String(error));
+    });
+
+    socket.on("unexpected-response", (request, response) => {
+      if (this.socket !== socket) {
+        return;
+      }
+
+      let body = "";
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        console.error("[audio] Deepgram handshake rejected:", response.statusCode, body);
+        this.socket = null;
+        this.#clearKeepAlive();
+
+        if (!options.skipKeyterms && response.statusCode === 400) {
+          // Retry once without keyterm prompting in case the account/plan doesn't support it.
+          this.start({ ...options, skipKeyterms: true });
+          return;
+        }
+
+        this.#setError(
+          `Deepgram rejected the connection (HTTP ${response.statusCode}). ${body || "Check your API key and account plan."}`
+        );
+      });
     });
 
     socket.on("close", () => {

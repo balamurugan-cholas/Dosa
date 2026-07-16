@@ -45,6 +45,7 @@ export interface StreamOpenRouterAnswerOptions {
   apiKey: string;
   model: string;
   messages: OpenRouterChatMessage[];
+  maxTokens: number;
   signal?: AbortSignal;
   onTextChunk: (chunk: string) => void;
 }
@@ -324,6 +325,7 @@ export async function streamOpenRouterAnswer({
   apiKey,
   model,
   messages,
+  maxTokens,
   signal,
   onTextChunk,
 }: StreamOpenRouterAnswerOptions): Promise<{ text: string }> {
@@ -337,11 +339,11 @@ export async function streamOpenRouterAnswer({
     body: JSON.stringify({
       model,
       stream: true,
-      // FIX 1: 0.2 produced robotic, over-averaged answers.
       // 0.7 gives natural variation in word choice and sentence rhythm
       // without hallucinating. 0.8 is the ceiling for interview answers
       // where factual accuracy still matters.
-      temperature: 0.2,
+      temperature: 0.7,
+      max_tokens: maxTokens,
       messages,
     }),
     signal,

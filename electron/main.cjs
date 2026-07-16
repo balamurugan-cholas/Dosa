@@ -831,7 +831,7 @@ function createWindow() {
     },
   });
 
-  //mainWindow.setContentProtection(true);
+  mainWindow.setContentProtection(true);
   mainWindow.setAlwaysOnTop(true, "screen-saver");
   mainWindow.setSkipTaskbar(true);
 
