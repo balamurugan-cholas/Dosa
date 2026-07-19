@@ -122,28 +122,11 @@ Install the Dosa Bridge extension from its `.vsix` file in VS Code (`Extensions 
 
 ## How It Works
 
-```
-System Audio
-     │
-     ▼
-getDisplayMedia() ──► ScriptProcessorNode ──► downsample to 16kHz PCM
-                                                       │
-                                                       ▼
-                                            Electron IPC (audio chunk)
-                                                       │
-                                                       ▼
-                                         Deepgram WebSocket (Nova-3)
-                                                       │
-                                                       ▼
-                                            Transcript event over IPC
-                                                       │
-                                                       ▼
-                                             React state → UI display
-```
+![How Dosa Works](./docs/how-it-works.svg)
 
-When you press **Answer** (or Auto-Answer triggers), the latest transcript is sent to OpenRouter and the response streams back token by token, written as the candidate speaking directly to the interviewer. When you press **Analyze**, a screenshot is captured, encoded as base64, and sent to Gemini.
+Audio is captured from your system, downsampled, and streamed to Deepgram over a WebSocket for live transcription. When you press **Answer** (or Auto-Answer triggers), the latest transcript is sent to OpenRouter and the response streams back token by token, written as the candidate speaking directly to the interviewer. When you press **Analyze**, a screenshot is captured, encoded as base64, and sent to Gemini.
 
-For coding questions, code blocks in the answer can be sent straight to your active VS Code file via the Dosa Bridge extension — either inserted as-is (**VS Code** button) or merged intelligently against your current file's contents (**Continue** button), using a line-level diff so only genuinely new code is added.
+For coding questions, code blocks in the answer can be sent straight to your active VS Code file via the Dosa Bridge extension — either inserted as-is (**VS Code** button) or merged intelligently against your current file's contents (**Continue** button). The `diff.ts` engine computes a line-level diff so only genuinely new code is added, then `vscode-bridge.cjs` relays the insertion over `localhost` to the Dosa Bridge extension, which applies it at your cursor in the active file.
 
 ---
 
