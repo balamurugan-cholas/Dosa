@@ -9,6 +9,9 @@ interface Props {
   activeAnswerId: number | null;
   scrollToBottomSignal: number;
   answerIndex: number;
+  codeInsertMode: "instant" | "natural";
+  openrouterApiKey: string;
+  openrouterModel: string;
 }
 
 export function MainView({
@@ -19,6 +22,9 @@ export function MainView({
   activeAnswerId,
   scrollToBottomSignal,
   answerIndex,
+  codeInsertMode,
+  openrouterApiKey,
+  openrouterModel,
 }: Props) {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -30,6 +36,9 @@ export function MainView({
         activeAnswerId={activeAnswerId}
         scrollToBottomSignal={scrollToBottomSignal}
         answerIndex={answerIndex}
+        codeInsertMode={codeInsertMode}
+        openrouterApiKey={openrouterApiKey}
+        openrouterModel={openrouterModel}
       />
     </div>
   );

@@ -14,6 +14,7 @@ const fs = require("fs/promises");
 const mammoth = require("mammoth");
 const { PDFParse } = require("pdf-parse");
 const { AudioTranscriptionManager } = require("./deepgram-transcription.cjs");
+const vscodeBridge = require("./vscode-bridge.cjs");
 const https = require("https");
 const { shell } = require("electron");
 
@@ -843,6 +844,9 @@ function createWindow() {
     }
   });
 
+  // TEMPORARY — remove once the blank-window issue is diagnosed.
+  //mainWindow.webContents.openDevTools({ mode: "detach" });
+
   if (isDev) {
     mainWindow.loadURL(devUrl);
   } else {
@@ -1015,6 +1019,26 @@ ipcMain.on("app:open-update-url", () => {
 
 ipcMain.handle("app:get-download-status", async () => getExistingDownloadStatus());
 
+ipcMain.handle("vscode:send-code", async (_event, payload) => {
+  const code = String(payload?.code || "");
+  const mode = payload?.mode === "natural" ? "natural" : "instant";
+  const anchor = payload?.anchorLine
+    ? { anchorLine: String(payload.anchorLine), position: payload.anchorPosition || "end" }
+    : null;
+  return vscodeBridge.sendCodeToVSCode(code, mode, anchor);
+});
+
+ipcMain.handle("vscode:get-file-content", async () => {
+  return vscodeBridge.getFileContentFromVSCode();
+});
+
+ipcMain.handle("vscode:apply-insertions", async (_event, payload) => {
+  const insertions = Array.isArray(payload?.insertions) ? payload.insertions : [];
+  const replacements = Array.isArray(payload?.replacements) ? payload.replacements : [];
+  const mode = payload?.mode === "natural" ? "natural" : "instant";
+  return vscodeBridge.applyInsertionsToVSCode(insertions, replacements, mode);
+});
+
 ipcMain.on("app:start-update-download", () => {
   void startUpdateDownload();
 });
@@ -1029,6 +1053,7 @@ app.whenReady().then(() => {
   configureDesktopCapture();
   createWindow();
   registerGlobalShortcuts();
+  vscodeBridge.connect();
 
   setTimeout(checkForUpdates, 3000);
   setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL_MS);

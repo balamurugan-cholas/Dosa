@@ -68,6 +68,10 @@ const DEFAULT_SETTINGS: SettingsState = {
   answerMemory: 5,
   resumeUploaded: false,
   resumeFileName: "",
+  codeInsertMode:
+    typeof window === "undefined"
+      ? "instant"
+      : (window.localStorage.getItem("dosa.codeInsertMode") as "instant" | "natural") ?? "instant",
 };
 
 export default function App() {
@@ -841,6 +845,10 @@ export default function App() {
       answerMemory.current = nextLimit > 0 ? answerMemory.current.slice(-nextLimit) : [];
     }
 
+    if (key === "codeInsertMode" && typeof value === "string") {
+      window.localStorage.setItem("dosa.codeInsertMode", value);
+    }
+
     setSettings((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -902,6 +910,9 @@ export default function App() {
             activeAnswerId={activeAnswerId}
             scrollToBottomSignal={scrollToBottomSignal}
             answerIndex={answerIndex}
+            codeInsertMode={settings.codeInsertMode}
+            openrouterApiKey={settings.openrouterApiKey}
+            openrouterModel={settings.openrouterModel}
           />
         ) : view === "settings" ? (
           <SettingsView

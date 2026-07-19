@@ -1,8 +1,23 @@
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import hljs from "highlight.js/lib/common";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
+import { FileCode2, Check, Loader2, GitMerge } from "lucide-react";
 import { ContentBlock } from "../lib/types";
+import { resolveFullFileRewrite, resolveOpenRouterModel } from "../lib/openrouter";
+import { computeInsertionPlan } from "../lib/diff";
+
+// Context lets markdownComponents.code (defined outside the component) read
+// the current setting synchronously on every render — no effect, no window
+// global, no stale-until-remount timing gap.
+const CodeInsertModeContext = createContext<"instant" | "natural">("instant");
+
+interface OpenRouterCreds {
+  apiKey: string;
+  model: string;
+}
+const OpenRouterCredsContext = createContext<OpenRouterCreds>({ apiKey: "", model: "" });
 
 type AnswerNode =
   | {
@@ -142,6 +157,170 @@ function getCodeLanguage(className?: string) {
   return match?.[1]?.toLowerCase() || "plaintext";
 }
 
+type SendState = "idle" | "sending" | "sent";
+
+function SendToVSCodeButton({ code, mode }: { code: string; mode: "instant" | "natural" }) {
+  const [state, setState] = useState<SendState>("idle");
+
+  const handleClick = async () => {
+    if (state === "sending") return;
+
+    const bridge = (window as any).vscodeBridge;
+    if (!bridge?.sendCode) {
+      toast.error("VS Code integration not available in this build.");
+      return;
+    }
+
+    setState("sending");
+    try {
+      const result = await bridge.sendCode(code, mode);
+      if (result?.success) {
+        setState("sent");
+        toast.success("Sent to VS Code");
+        setTimeout(() => setState("idle"), 1500);
+      } else {
+        setState("idle");
+        toast.error(result?.error || "Could not send code to VS Code");
+      }
+    } catch {
+      setState("idle");
+      toast.error("Could not send code to VS Code");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={state === "sending"}
+      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-60"
+      title="Insert at cursor in VS Code"
+    >
+      {state === "sending" ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : state === "sent" ? (
+        <Check className="h-3 w-3" />
+      ) : (
+        <FileCode2 className="h-3 w-3" />
+      )}
+      {state === "sent" ? "Sent" : "VS Code"}
+    </button>
+  );
+}
+
+function ContinueInVSCodeButton({ code, mode }: { code: string; mode: "instant" | "natural" }) {
+  const [state, setState] = useState<SendState>("idle");
+  const creds = useContext(OpenRouterCredsContext);
+
+  const handleClick = async () => {
+    if (state === "sending") return;
+
+    const bridge = (window as any).vscodeBridge;
+    if (!bridge?.sendCode || !bridge?.getFileContent) {
+      toast.error("VS Code integration not available in this build.");
+      return;
+    }
+
+    const apiKey = creds.apiKey.trim();
+    if (!apiKey) {
+      toast.error("Add your OpenRouter API key in settings to use Continue.");
+      return;
+    }
+
+    setState("sending");
+    try {
+      const fileResult = await bridge.getFileContent();
+      if (!fileResult?.success) {
+        setState("idle");
+        toast.error(fileResult?.error || "Could not read the current VS Code file.");
+        return;
+      }
+
+      const rewrittenContent = await resolveFullFileRewrite({
+        apiKey,
+        model: resolveOpenRouterModel(creds.model),
+        fileContent: fileResult.content,
+        languageId: fileResult.languageId,
+        newCode: code,
+      });
+
+      const plan = computeInsertionPlan(fileResult.content, rewrittenContent);
+      console.log("[continue] ORIGINAL:\n" + fileResult.content);
+      console.log("[continue] REWRITTEN:\n" + rewrittenContent);
+      console.log("[continue] plan.safe:", plan.safe, "reason:", plan.reason);
+      console.log("[continue] plan.offendingLine:", JSON.stringify(plan.offendingLine));
+      console.log("[continue] plan.insertions:", plan.insertions);
+
+      if (!plan.safe) {
+        setState("idle");
+        toast.error(
+          `Refused to apply — ${plan.reason || "the model altered existing code."} Try again or insert manually.`
+        );
+        return;
+      }
+
+      if (plan.insertions.length === 0) {
+        setState("idle");
+        toast.message("Nothing new to add — this already exists in the file.");
+        return;
+      }
+
+      const bridgeAny = bridge as {
+        applyInsertions?: (insertions: unknown, mode: string, replacements: unknown) => Promise<any>;
+      };
+      if (!bridgeAny.applyInsertions) {
+        setState("idle");
+        toast.error("VS Code integration is out of date — restart the app.");
+        return;
+      }
+
+      const result = await bridgeAny.applyInsertions(plan.insertions, mode, plan.replacements);
+      if (result?.success) {
+        setState("sent");
+        toast.success("Placed in VS Code");
+        setTimeout(() => setState("idle"), 1500);
+      } else {
+        setState("idle");
+        toast.error(result?.error || "Could not place code in VS Code");
+      }
+    } catch (err) {
+      setState("idle");
+      toast.error(err instanceof Error ? err.message : "Could not determine placement");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={state === "sending"}
+      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-60"
+      title="Sends the full file to the model for precise placement — uses more tokens than the VS Code button"
+    >
+      {state === "sending" ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : state === "sent" ? (
+        <Check className="h-3 w-3" />
+      ) : (
+        <GitMerge className="h-3 w-3" />
+      )}
+      {state === "sent" ? "Placed" : "Continue"}
+    </button>
+  );
+}
+
+// Small wrapper so markdownComponents (a module-level object) can still
+// read the current mode via context at render time.
+function SendToVSCodeButtonConnected({ code }: { code: string }) {
+  const mode = useContext(CodeInsertModeContext);
+  return (
+    <div className="flex items-center gap-1.5">
+      <SendToVSCodeButton code={code} mode={mode} />
+      <ContinueInVSCodeButton code={code} mode={mode} />
+    </div>
+  );
+}
+
 const markdownComponents: Components = {
   p({ children }) {
     return (
@@ -245,6 +424,7 @@ const markdownComponents: Components = {
           <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             {highlighted.language}
           </span>
+          <SendToVSCodeButtonConnected code={rawCode} />
         </div>
         <pre className="overflow-x-auto px-3 py-3 text-xs leading-[1.65]">
           <code
@@ -340,9 +520,12 @@ function AnswerText({
               <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 {highlighted.language}
               </span>
-              {node.open && active && (
-                <span className="text-[9px] text-muted-foreground">streaming</span>
-              )}
+              <div className="flex items-center gap-2">
+                {node.open && active && (
+                  <span className="text-[9px] text-muted-foreground">streaming</span>
+                )}
+                {!node.open && <SendToVSCodeButtonConnected code={node.code} />}
+              </div>
             </div>
             <pre className="overflow-x-auto px-3 py-3 text-xs leading-[1.65]">
               <code
@@ -366,6 +549,9 @@ interface Props {
   scrollToBottomSignal: number;
   // Answer navigation
   answerIndex: number;
+  codeInsertMode: "instant" | "natural";
+  openrouterApiKey: string;
+  openrouterModel: string;
 }
 
 export function ContentArea({
@@ -376,6 +562,9 @@ export function ContentArea({
   activeAnswerId,
   scrollToBottomSignal,
   answerIndex,
+  codeInsertMode,
+  openrouterApiKey,
+  openrouterModel,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -415,7 +604,9 @@ export function ContentArea({
   const isEmpty = blocks.length === 0;
 
   return (
-    // Outer: fixed height, no scroll — just a flex column container
+    <CodeInsertModeContext.Provider value={codeInsertMode}>
+    <OpenRouterCredsContext.Provider value={{ apiKey: openrouterApiKey, model: openrouterModel }}>
+    {/* Outer: fixed height, no scroll — just a flex column container */}
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-3 py-3">
       {isEmpty ? (
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -476,5 +667,7 @@ export function ContentArea({
         </div>
       )}
     </div>
+    </OpenRouterCredsContext.Provider>
+    </CodeInsertModeContext.Provider>
   );
 }

@@ -321,6 +321,105 @@ function createErrorMessage(response: Response, fallback: string) {
     .catch(() => fallback);
 }
 
+export interface ResolveFullFileRewriteOptions {
+  apiKey: string;
+  model: string;
+  fileContent: string;
+  languageId: string;
+  newCode: string;
+  signal?: AbortSignal;
+}
+
+const FULL_REWRITE_SYSTEM_PROMPT = `You integrate new code into an existing file.
+
+You will be given the CURRENT FILE CONTENT and a proposed NEW CODE SNIPPET that needs to be added to it (the snippet may be a full standalone example — treat it only as a reference for what new behavior is needed, not as something to paste in verbatim).
+
+Your job: return the COMPLETE, FINAL content of the file after adding what's genuinely new — nothing more, nothing less.
+
+Absolute rules:
+1. Every existing line in CURRENT FILE CONTENT must appear in your output EXACTLY as it was — same text, same whitespace, same order. Do not reformat, reindent, reorder, rename, "clean up", or rewrite anything that already exists, even if you think it could be improved. Do not fix unrelated bugs. Do not touch comments. Do not touch existing imports.
+2. Only ADD new lines. Never remove or modify an existing line.
+3. Do not duplicate anything already present — if the new snippet implies an import, a Flask app instance, a db setup, a class, etc. that already exists in the file, do NOT add it again. Only add what's genuinely missing (e.g. a new route, a new function, a new field, a new import that truly isn't there yet).
+4. Keep the file's existing structure and conventions: imports stay at the top (new imports get added to the existing import block, not scattered), new functions/routes go in a sensible place near related existing code (or at the end if unrelated), and overall formatting stays consistent with the rest of the file.
+5. Preserve the file's existing blank-line/spacing conventions between top-level definitions.
+
+Respond with ONLY the raw final file content — no markdown code fences, no explanation, no commentary before or after. Just the file, exactly as it should be saved to disk.`;
+
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const fenceMatch = trimmed.match(/^```[\w.+#-]*\n([\s\S]*?)\n?```$/);
+  return fenceMatch ? fenceMatch[1] : trimmed;
+}
+
+/**
+ * Asks the model for the COMPLETE updated file content (existing code
+ * preserved verbatim + new code integrated). This is intentionally a
+ * full-file-in, full-file-out call — more expensive in tokens than a small
+ * placement decision, but far more reliable: the caller is expected to diff
+ * the result against the original and only apply pure insertions (see
+ * src/lib/diff.ts), rejecting anything that touches existing lines.
+ */
+export async function resolveFullFileRewrite({
+  apiKey,
+  model,
+  fileContent,
+  languageId,
+  newCode,
+  signal,
+}: ResolveFullFileRewriteOptions): Promise<string> {
+  const userContent = [
+    `LANGUAGE: ${languageId || "unknown"}`,
+    "",
+    "CURRENT FILE CONTENT:",
+    "```",
+    fileContent || "(empty file)",
+    "```",
+    "",
+    "NEW CODE TO INTEGRATE (reference only — adapt it to fit the existing file, don't paste it verbatim if it duplicates anything):",
+    "```",
+    newCode,
+    "```",
+  ].join("\n");
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "X-OpenRouter-Title": OPENROUTER_TITLE,
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.1, // deterministic — this is precise integration, not creative writing
+      max_tokens: 8000,
+      messages: [
+        { role: "system", content: FULL_REWRITE_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await createErrorMessage(
+        response,
+        `OpenRouter rewrite request failed with status ${response.status}`
+      )
+    );
+  }
+
+  const json = await response.json();
+  const rawText = extractDeltaText(json) || extractDeltaText({ choices: json?.choices });
+
+  if (!rawText) {
+    throw new Error("OpenRouter returned an empty rewrite response.");
+  }
+
+  return stripCodeFence(rawText);
+}
+
 export async function streamOpenRouterAnswer({
   apiKey,
   model,

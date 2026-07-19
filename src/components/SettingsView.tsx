@@ -9,6 +9,7 @@ import { JobRoleSelect } from "./settings/JobRoleSelect";
 import { AnswerMemory } from "./settings/AnswerMemory";
 import { ResumeUpload } from "./settings/ResumeUpload";
 import { ShortcutKeys } from "./settings/ShortcutKeys";
+import { CodeInsertMode } from "./settings/CodeInsertMode";
 import { AboutSection } from "./settings/AboutSection";
 
 interface Props {
@@ -88,6 +89,13 @@ export function SettingsView({
           fileName={settings.resumeFileName}
           onUpload={onResumeUpload}
           onDelete={onResumeDelete}
+        />
+      </Row>
+
+      <Row>
+        <CodeInsertMode
+          value={settings.codeInsertMode}
+          onChange={(v) => onChange("codeInsertMode", v)}
         />
       </Row>
 

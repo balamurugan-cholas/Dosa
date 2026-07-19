@@ -107,6 +107,14 @@ contextBridge.exposeInMainWorld("resumeStore", {
   remove: () => ipcRenderer.invoke("resume:delete"),
 });
 
+contextBridge.exposeInMainWorld("vscodeBridge", {
+  sendCode: (code, mode, anchorLine, anchorPosition) =>
+    ipcRenderer.invoke("vscode:send-code", { code, mode, anchorLine, anchorPosition }),
+  getFileContent: () => ipcRenderer.invoke("vscode:get-file-content"),
+  applyInsertions: (insertions, mode, replacements) =>
+    ipcRenderer.invoke("vscode:apply-insertions", { insertions, mode, replacements }),
+});
+
 contextBridge.exposeInMainWorld("appUpdater", {
   getInfo: () => ipcRenderer.invoke("app:get-update-info"),
   getDownloadStatus: () => ipcRenderer.invoke("app:get-download-status"),

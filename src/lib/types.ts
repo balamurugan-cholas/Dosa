@@ -92,6 +92,8 @@ export interface AudioTranscriptionStartResult {
   error: string | null;
 }
 
+export type CodeInsertMode = "instant" | "natural";
+
 export interface SettingsState {
   deepgramApiKey: string;
   openrouterApiKey: string;
@@ -103,6 +105,7 @@ export interface SettingsState {
   answerMemory: number;
   resumeUploaded: boolean;
   resumeFileName: string;
+  codeInsertMode: CodeInsertMode;
 }
 
 export interface ResumeRecord {
