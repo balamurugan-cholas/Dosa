@@ -16,6 +16,9 @@ A lightweight, Invisible to interviewer, always-on-top desktop app that listens 
 - **Answer Memory** - Remembers past Q&A pairs within a session so answers stay contextually consistent (set to 0 to disable)
 - **Resume-Aware** - Upload your resume so the AI draws from your actual background when answering personal or experience questions
 - **Candidate Voice** - AI answers are written in first person, directly to the interviewer - no AI-speak, no filler phrases
+- **VS Code Bridge** - A companion VS Code extension ("Dosa Bridge") connects Dosa directly to your editor over `localhost`. Every code block in a coding answer gets a "VS Code" button that inserts it straight into your active file at the cursor, and nothing leaves your machine
+- **Continue — Smart Code Placement** - For follow-up coding questions, the "Continue" button sends your current file to the model, which works out exactly what's new and where it belongs — no duplicate imports, no re-declared setup code, no code landing in the wrong spot. A line-level diffing engine and block-aware insertion logic keep the rest of your file untouched, and any edit that tries to rewrite existing code (rather than just add to it) is automatically rejected
+- **Natural Typing Mode** - Choose between Instant (pastes immediately) or Natural Typing (types code out like a real person, with variable per-character speed, occasional thinking pauses, and correct indentation) — switchable anytime in Settings, no restart needed
 - **In-App Auto Update** - When a new version is available, an update icon appears in the topbar; click to download, install, and relaunch instantly
 - **Always on Top** - Transparent, frameless overlay that stays visible over any other app
 - **Global Shortcuts** - Control everything without clicking into the app
@@ -39,6 +42,7 @@ A lightweight, Invisible to interviewer, always-on-top desktop app that listens 
 | Transcription | Deepgram Nova-3 (WebSocket streaming) |
 | AI Answers | OpenRouter (any model) |
 | Screen Analysis | Google Gemini 2.5 Flash |
+| Editor Integration | Dosa Bridge (VS Code extension, local WebSocket) |
 | Build | Vite |
 | Styling | shadcn/ui |
 
@@ -48,6 +52,7 @@ A lightweight, Invisible to interviewer, always-on-top desktop app that listens 
 
 - [Node.js](https://nodejs.org/) v18 or later
 - API keys for the services you want to use (see below)
+- (Optional) VS Code with the Dosa Bridge extension installed, for editor integration
 
 ---
 
@@ -92,6 +97,10 @@ This starts the Vite dev server and launches the Electron window simultaneously.
 npm run package:win
 ```
 
+### 5. (Optional) Connect VS Code
+
+Install the Dosa Bridge extension from its `.vsix` file in VS Code (`Extensions → ... → Install from VSIX`). It runs quietly in the background and connects automatically over `localhost` — nothing leaves your machine. Once installed, coding answers in Dosa show "VS Code" and "Continue" buttons for direct insertion.
+
 ---
 
 ## Global Shortcuts
@@ -113,26 +122,11 @@ npm run package:win
 
 ## How It Works
 
-```
-System Audio
-     │
-     ▼
-getDisplayMedia() ──► ScriptProcessorNode ──► downsample to 16kHz PCM
-                                                       │
-                                                       ▼
-                                            Electron IPC (audio chunk)
-                                                       │
-                                                       ▼
-                                         Deepgram WebSocket (Nova-3)
-                                                       │
-                                                       ▼
-                                            Transcript event over IPC
-                                                       │
-                                                       ▼
-                                             React state → UI display
-```
+![How Dosa Works](./docs/how-it-works.svg)
 
-When you press **Answer** (or Auto-Answer triggers), the latest transcript is sent to OpenRouter and the response streams back token by token, written as the candidate speaking directly to the interviewer. When you press **Analyze**, a screenshot is captured, encoded as base64, and sent to Gemini.
+Audio is captured from your system, downsampled, and streamed to Deepgram over a WebSocket for live transcription. When you press **Answer** (or Auto-Answer triggers), the latest transcript is sent to OpenRouter and the response streams back token by token, written as the candidate speaking directly to the interviewer. When you press **Analyze**, a screenshot is captured, encoded as base64, and sent to Gemini.
+
+For coding questions, code blocks in the answer can be sent straight to your active VS Code file via the Dosa Bridge extension — either inserted as-is (**VS Code** button) or merged intelligently against your current file's contents (**Continue** button). The `diff.ts` engine computes a line-level diff so only genuinely new code is added, then `vscode-bridge.cjs` relays the insertion over `localhost` to the Dosa Bridge extension, which applies it at your cursor in the active file.
 
 ---
 
@@ -142,27 +136,62 @@ When you press **Answer** (or Auto-Answer triggers), the latest transcript is se
 ├── electron/
 │   ├── main.cjs                   # Electron main process, IPC handlers, global shortcuts
 │   ├── preload.cjs                # Context bridge (exposes APIs to renderer)
-│   └── deepgram-transcription.cjs # Deepgram WebSocket manager
-│
-├── src/
-│   ├── app/
-│   │   └── App.tsx                # Root component, all state management
-│   ├── components/
-│   │   ├── ContentArea.tsx        # Transcript + answer display
-│   │   ├── MainView.tsx           # Main layout
-│   │   ├── Topbar.tsx             # Controls, answer navigation, auto-answer toggle
-│   │   ├── SettingsView.tsx       # Settings panel
-│   │   └── settings/              # Individual settings sections
-│   └── lib/
-│       ├── audio-transcription-deepgram.ts  # Renderer-side audio capture
-│       ├── analyze-screen.ts                # Gemini screen analysis
-│       ├── openrouter.ts                    # OpenRouter streaming + intent detection
-│       ├── openrouter-system-prompt.ts      # Candidate persona system prompt
-│       ├── types.ts                         # Shared TypeScript types
-│       └── window-controls.ts              # Window IPC helpers
+│   ├── deepgram-transcription.cjs # Deepgram WebSocket manager
+│   └── vscode-bridge.cjs          # Local WebSocket bridge to the Dosa Bridge VS Code extension
 │
 ├── scripts/
 │   └── dev.mjs                    # Dev launcher (Vite + Electron)
+│
+├── src/
+│   ├── main.tsx                   # Renderer entry point
+│   │
+│   ├── app/
+│   │   ├── App.tsx                # Root component, all state management
+│   │   └── components/
+│   │       ├── figma/
+│   │       │   └── ImageWithFallback.tsx
+│   │       └── ui/                # shadcn/ui primitives (button, dialog, select, table, etc.)
+│   │
+│   ├── components/
+│   │   ├── CaptureStatusModal.tsx
+│   │   ├── ContentArea.tsx        # Transcript + answer display
+│   │   ├── MainView.tsx           # Main layout
+│   │   ├── SettingsView.tsx       # Settings panel
+│   │   ├── Topbar.tsx             # Controls, answer navigation, auto-answer toggle
+│   │   ├── UpdateView.tsx         # In-app auto-update UI
+│   │   └── settings/              # Individual settings sections
+│   │       ├── AboutSection.tsx
+│   │       ├── AnalyzeScreenGeminiApiKey.tsx
+│   │       ├── AnalyzeScreenModel.tsx
+│   │       ├── AnswerMemory.tsx
+│   │       ├── AppTransparency.tsx
+│   │       ├── AppWidth.tsx
+│   │       ├── CodeInsertMode.tsx     # Instant vs. Natural Typing toggle
+│   │       ├── JobRoleSelect.tsx
+│   │       ├── OpenRouterModel.tsx
+│   │       ├── ResumeUpload.tsx
+│   │       ├── ShortcutKeys.tsx
+│   │       └── TranscriptionModel.tsx
+│   │
+│   ├── lib/
+│   │   ├── analyze-screen-system-prompt.ts
+│   │   ├── analyze-screen.ts          # Gemini screen analysis
+│   │   ├── audio-transcription-deepgram.ts  # Renderer-side audio capture
+│   │   ├── constants.ts
+│   │   ├── diff.ts                    # Line-level diffing engine for Continue / code insertion
+│   │   ├── openrouter-system-prompt.ts  # Candidate persona system prompt
+│   │   ├── openrouter.ts              # OpenRouter streaming + intent detection
+│   │   ├── resume.ts
+│   │   ├── types.ts                   # Shared TypeScript types
+│   │   └── window-controls.ts         # Window IPC helpers
+│   │
+│   └── styles/
+│       ├── fonts.css
+│       ├── globals.css
+│       ├── index.css
+│       ├── tailwind.css
+│       └── theme.css
+│
 └── index.html
 ```
 
@@ -178,6 +207,7 @@ All settings are accessible via the gear icon in the topbar.
 - **Job Role** — passed to the AI as context (e.g. "Software Engineer")
 - **Answer Memory** — how many past Q&A pairs to include per answer (0 to disable; recommended for faster answers)
 - **Resume Upload** — upload a PDF, DOCX, TXT, or MD file; extracted text is used for resume-related answers
+- **Code Insert Style** — choose Instant or Natural Typing for how code is inserted into VS Code
 - **App Width** — adjust the overlay width (760–1000px)
 - **App Transparency** — adjust the overlay opacity
 
@@ -190,6 +220,7 @@ All settings are accessible via the gear icon in the topbar.
 - AirPods and Bluetooth device switching may require restarting the Listen session
 - Free OpenRouter models may be rate-limited; bring your own API key for reliability
 - On macOS, system audio capture via `getDisplayMedia` may not work without a third-party virtual audio driver
+- VS Code integration requires the Dosa Bridge extension to be installed and running
 
 ---
 
