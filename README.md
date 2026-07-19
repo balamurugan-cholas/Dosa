@@ -153,27 +153,62 @@ For coding questions, code blocks in the answer can be sent straight to your act
 ├── electron/
 │   ├── main.cjs                   # Electron main process, IPC handlers, global shortcuts
 │   ├── preload.cjs                # Context bridge (exposes APIs to renderer)
-│   └── deepgram-transcription.cjs # Deepgram WebSocket manager
-│
-├── src/
-│   ├── app/
-│   │   └── App.tsx                # Root component, all state management
-│   ├── components/
-│   │   ├── ContentArea.tsx        # Transcript + answer display
-│   │   ├── MainView.tsx           # Main layout
-│   │   ├── Topbar.tsx             # Controls, answer navigation, auto-answer toggle
-│   │   ├── SettingsView.tsx       # Settings panel
-│   │   └── settings/              # Individual settings sections
-│   └── lib/
-│       ├── audio-transcription-deepgram.ts  # Renderer-side audio capture
-│       ├── analyze-screen.ts                # Gemini screen analysis
-│       ├── openrouter.ts                    # OpenRouter streaming + intent detection
-│       ├── openrouter-system-prompt.ts      # Candidate persona system prompt
-│       ├── types.ts                         # Shared TypeScript types
-│       └── window-controls.ts              # Window IPC helpers
+│   ├── deepgram-transcription.cjs # Deepgram WebSocket manager
+│   └── vscode-bridge.cjs          # Local WebSocket bridge to the Dosa Bridge VS Code extension
 │
 ├── scripts/
 │   └── dev.mjs                    # Dev launcher (Vite + Electron)
+│
+├── src/
+│   ├── main.tsx                   # Renderer entry point
+│   │
+│   ├── app/
+│   │   ├── App.tsx                # Root component, all state management
+│   │   └── components/
+│   │       ├── figma/
+│   │       │   └── ImageWithFallback.tsx
+│   │       └── ui/                # shadcn/ui primitives (button, dialog, select, table, etc.)
+│   │
+│   ├── components/
+│   │   ├── CaptureStatusModal.tsx
+│   │   ├── ContentArea.tsx        # Transcript + answer display
+│   │   ├── MainView.tsx           # Main layout
+│   │   ├── SettingsView.tsx       # Settings panel
+│   │   ├── Topbar.tsx             # Controls, answer navigation, auto-answer toggle
+│   │   ├── UpdateView.tsx         # In-app auto-update UI
+│   │   └── settings/              # Individual settings sections
+│   │       ├── AboutSection.tsx
+│   │       ├── AnalyzeScreenGeminiApiKey.tsx
+│   │       ├── AnalyzeScreenModel.tsx
+│   │       ├── AnswerMemory.tsx
+│   │       ├── AppTransparency.tsx
+│   │       ├── AppWidth.tsx
+│   │       ├── CodeInsertMode.tsx     # Instant vs. Natural Typing toggle
+│   │       ├── JobRoleSelect.tsx
+│   │       ├── OpenRouterModel.tsx
+│   │       ├── ResumeUpload.tsx
+│   │       ├── ShortcutKeys.tsx
+│   │       └── TranscriptionModel.tsx
+│   │
+│   ├── lib/
+│   │   ├── analyze-screen-system-prompt.ts
+│   │   ├── analyze-screen.ts          # Gemini screen analysis
+│   │   ├── audio-transcription-deepgram.ts  # Renderer-side audio capture
+│   │   ├── constants.ts
+│   │   ├── diff.ts                    # Line-level diffing engine for Continue / code insertion
+│   │   ├── openrouter-system-prompt.ts  # Candidate persona system prompt
+│   │   ├── openrouter.ts              # OpenRouter streaming + intent detection
+│   │   ├── resume.ts
+│   │   ├── types.ts                   # Shared TypeScript types
+│   │   └── window-controls.ts         # Window IPC helpers
+│   │
+│   └── styles/
+│       ├── fonts.css
+│       ├── globals.css
+│       ├── index.css
+│       ├── tailwind.css
+│       └── theme.css
+│
 └── index.html
 ```
 
